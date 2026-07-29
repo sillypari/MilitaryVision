@@ -49,13 +49,13 @@ high-confidence observations. The original reference is never replaced.
 ## Reacquisition
 
 The MVP searches the complete frame as soon as short-term tracking fails. During
-local tracking, motion and the last confirmed position remain useful gates. Once
-full-frame reacquisition begins, distance is no longer part of the acceptance
-score because the prediction is not trustworthy enough to veto identity evidence.
-Full-frame matches instead use a normalized combination of appearance, colour,
-shape, and size. They require a stronger appearance threshold, ambiguity
-separation, and multiple consecutive confirmations before the short-term tracker
-is reinitialized.
+local tracking, motion and the last confirmed position remain useful gates.
+Full-frame scoring retains the hybrid appearance, motion, colour, shape, and size
+model, but distant candidates receive a neutral motion prior. Distance therefore
+cannot drive an otherwise valid identity match below the threshold; plausible
+nearby motion contributes only a bounded tie-break. Full-frame matches require a
+stronger appearance threshold, ambiguity separation, and multiple consecutive
+confirmations before the short-term tracker is reinitialized.
 
 For laptop performance, proposal generation searches a scaled copy of the whole
 frame and uses the original plus the newest reference crop. The candidate box is

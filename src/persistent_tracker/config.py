@@ -64,6 +64,7 @@ class ReidentificationConfig:
     full_frame_minimum_appearance_score: float
     full_frame_processing_width: int = 640
     full_frame_max_reference_templates: int = 2
+    full_frame_ambiguity_margin: float = 0.06
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +182,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Full-frame search width must be at least 320 pixels.")
     if config.reidentification.full_frame_max_reference_templates < 1:
         errors.append("Full-frame search must use at least one reference template.")
+    if not 0.0 <= config.reidentification.full_frame_ambiguity_margin <= 1.0:
+        errors.append("Full-frame ambiguity margin must be between 0.0 and 1.0.")
     if (
         config.identity_memory.bootstrap_reference_count
         > config.identity_memory.maximum_references

@@ -49,3 +49,17 @@ def test_invalid_csrt_profile_is_rejected() -> None:
     errors = validate_config(replace(config, tracking=invalid_tracking))
 
     assert "CSRT profile must be Accurate, Balanced, or Fast." in errors
+
+
+def test_invalid_full_frame_ambiguity_margin_is_rejected() -> None:
+    config = load_config()
+    invalid_reidentification = replace(
+        config.reidentification,
+        full_frame_ambiguity_margin=1.5,
+    )
+
+    errors = validate_config(
+        replace(config, reidentification=invalid_reidentification)
+    )
+
+    assert "Full-frame ambiguity margin must be between 0.0 and 1.0." in errors

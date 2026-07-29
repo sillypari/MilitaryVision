@@ -35,37 +35,13 @@ def combined_candidate_score(
     )
 
 
-def identity_candidate_score(
-    *,
-    appearance_similarity: float,
-    shape_similarity: float,
-    colour_similarity: float,
-    size_similarity: float,
-    config: ReidentificationConfig,
-) -> float:
-    identity_weight = (
-        config.appearance_weight
-        + config.shape_weight
-        + config.colour_weight
-        + config.size_weight
-    )
-    if identity_weight <= 0.0:
-        return 0.0
-    weighted_identity = (
-        appearance_similarity * config.appearance_weight
-        + shape_similarity * config.shape_weight
-        + colour_similarity * config.colour_weight
-        + size_similarity * config.size_weight
-    )
-    return float(weighted_identity / identity_weight)
-
-
 def choose_unambiguous_candidate(
     candidates: list[CandidateMatch],
     config: ReidentificationConfig,
     *,
     minimum_appearance_score: float | None = None,
     require_motion_gate: bool = True,
+    ambiguity_margin: float | None = None,
 ) -> CandidateMatch | None:
     if not candidates:
         return None
@@ -83,7 +59,12 @@ def choose_unambiguous_candidate(
         return None
     if best.combined_score < config.minimum_match_score:
         return None
-    if best.combined_score - second_score < config.ambiguity_margin:
+    required_margin = (
+        config.ambiguity_margin
+        if ambiguity_margin is None
+        else ambiguity_margin
+    )
+    if best.combined_score - second_score < required_margin:
         return None
     return best
 
@@ -296,25 +277,14 @@ class LocalCandidateMatcher:
                 predicted_width * predicted_height,
             )
             size = math.exp(-abs(math.log(max(1e-3, area_ratio))))
-            if full_frame_search:
-                # Once the local lock is gone, predicted position is not reliable
-                # enough to veto a strong identity match elsewhere in the frame.
-                score = identity_candidate_score(
-                    appearance_similarity=appearance,
-                    shape_similarity=shape,
-                    colour_similarity=colour,
-                    size_similarity=size,
-                    config=self.config,
-                )
-            else:
-                score = combined_candidate_score(
-                    appearance_similarity=appearance,
-                    motion_similarity=motion,
-                    shape_similarity=shape,
-                    colour_similarity=colour,
-                    size_similarity=size,
-                    config=self.config,
-                )
+            score = combined_candidate_score(
+                appearance_similarity=appearance,
+                motion_similarity=motion,
+                shape_similarity=shape,
+                colour_similarity=colour,
+                size_similarity=size,
+                config=self.config,
+            )
             matches.append(
                 CandidateMatch(
                     candidate_id=candidate_id,
@@ -337,6 +307,11 @@ class LocalCandidateMatcher:
                 else None
             ),
             require_motion_gate=not full_frame_search,
+            ambiguity_margin=(
+                self.config.full_frame_ambiguity_margin
+                if full_frame_search
+                else None
+            ),
         )
         self.last_search_duration_ms = (perf_counter() - started_at) * 1000.0
         return matches, accepted

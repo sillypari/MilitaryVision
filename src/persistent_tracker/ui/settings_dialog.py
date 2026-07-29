@@ -200,10 +200,10 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
         ),
         score(
             "reidentification.full_frame_motion_floor",
-            "Full-frame motion diagnostic floor",
+            "Full-frame neutral motion prior",
             (
-                "Used for reported motion consistency after a distant match. "
-                "It does not restrict full-frame identity acceptance."
+                "Prevents distance from vetoing a whole-frame identity match. "
+                "Nearby motion can still provide a small tie-break."
             ),
         ),
         score(
@@ -232,6 +232,14 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
             tooltip=(
                 "Uses the protected original plus the newest references. "
                 "Final identity verification still uses identity memory."
+            ),
+        ),
+        score(
+            "reidentification.full_frame_ambiguity_margin",
+            "Full-frame ambiguity margin",
+            (
+                "Minimum score separation during whole-frame search. "
+                "Temporal confirmation remains required."
             ),
         ),
     ),

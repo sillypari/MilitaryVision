@@ -77,8 +77,10 @@ memory.
 When local tracking fails, the proposal stage searches a scaled copy of the
 entire frame for CPU efficiency. Candidate coordinates are mapped back to the
 normal processing resolution and verified against the original frame. Distance
-from the last position cannot veto a strong full-frame identity match, allowing
-the target to move between opposite parts of the image.
+from the last position cannot veto a strong full-frame identity match: distant
+candidates receive a neutral motion prior, while plausible nearby motion provides
+only a bounded tie-break. This allows the target to move between opposite parts
+of the image.
 
 A full-frame candidate is accepted only when:
 
@@ -198,12 +200,16 @@ Important laptop settings:
 | Setting | Default | Effect |
 |---|---:|---|
 | `tracking.csrt_profile` | `BALANCED` | Controls normal locked-frame CPU cost |
+| `tracking.locked_minimum` | `0.66` | Minimum combined evidence for a strong locked observation |
+| `tracking.minimum_identity_confidence` | `0.54` | Minimum identity evidence for a strong locked observation |
+| `tracking.weak_observation_grace_frames` | `12` | Bridges short blur and lighting changes without updating identity memory |
 | `video.processing_width` | `1280` | Maximum normal processing width |
 | `video.processing_height` | `720` | Maximum normal processing height |
 | `reidentification.full_frame_processing_width` | `640` | Controls whole-frame proposal cost |
 | `reidentification.full_frame_max_reference_templates` | `2` | Controls proposal viewpoint coverage and CPU cost |
-| `reidentification.full_frame_minimum_appearance_score` | `0.82` | Rejects weak distant identity matches |
-| `reidentification.ambiguity_margin` | `0.12` | Rejects scenes with similarly plausible candidates |
+| `reidentification.minimum_match_score` | `0.74` | Minimum combined candidate evidence |
+| `reidentification.full_frame_minimum_appearance_score` | `0.76` | Rejects weak distant identity matches |
+| `reidentification.full_frame_ambiguity_margin` | `0.06` | Rejects similarly plausible full-frame candidates |
 | `reidentification.consecutive_confirmations` | `3` | Prevents one-frame relock decisions |
 
 Recommended tuning order:

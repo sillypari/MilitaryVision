@@ -12,18 +12,18 @@ video:
 tracking:
   preferred_tracker: CSRT
   csrt_profile: BALANCED
-  locked_minimum: 0.72
-  minimum_identity_confidence: 0.62
+  locked_minimum: 0.66
+  minimum_identity_confidence: 0.54
   minimum_tracking_quality: 0.55
-  locked_exit_identity_confidence: 0.50
-  locked_exit_tracking_quality: 0.75
-  weak_observation_grace_frames: 5
-  appearance_override_identity_confidence: 0.68
-  appearance_override_template_similarity: 0.52
-  appearance_override_tracking_quality: 0.65
+  locked_exit_identity_confidence: 0.42
+  locked_exit_tracking_quality: 0.68
+  weak_observation_grace_frames: 12
+  appearance_override_identity_confidence: 0.56
+  appearance_override_template_similarity: 0.48
+  appearance_override_tracking_quality: 0.60
   prediction_maximum_outside_ratio: 0.50
-  occlusion_threshold: 0.48
-  lost_threshold: 0.25
+  occlusion_threshold: 0.42
+  lost_threshold: 0.22
   maximum_prediction_frames: 30
   maximum_prediction_seconds: 2.0
   maximum_reacquisition_frames: 120
@@ -37,17 +37,18 @@ reidentification:
   shape_weight: 0.10
   colour_weight: 0.10
   size_weight: 0.10
-  minimum_match_score: 0.78
-  minimum_appearance_score: 0.72
+  minimum_match_score: 0.74
+  minimum_appearance_score: 0.68
   ambiguity_margin: 0.12
   consecutive_confirmations: 3
   local_search_radius: 180
   last_position_search_multiplier: 1.25
   full_frame_search_after_frames: 0
-  full_frame_motion_floor: 0.35
-  full_frame_minimum_appearance_score: 0.82
+  full_frame_motion_floor: 0.75
+  full_frame_minimum_appearance_score: 0.76
   full_frame_processing_width: 640
   full_frame_max_reference_templates: 2
+  full_frame_ambiguity_margin: 0.06
 
 identity_memory:
   minimum_update_confidence: 0.74

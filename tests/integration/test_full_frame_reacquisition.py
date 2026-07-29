@@ -79,6 +79,49 @@ def test_changed_target_reacquires_in_opposite_quadrant() -> None:
     assert results[-1].box[1] < 100
 
 
+def test_rotated_blurred_target_reacquires_below_old_threshold() -> None:
+    generator = np.random.default_rng(333)
+    background = generator.integers(0, 30, (360, 640, 3), dtype=np.uint8)
+    target = generator.integers(50, 225, (72, 92, 3), dtype=np.uint8)
+    cv2.rectangle(target, (3, 3), (88, 68), (20, 220, 220), 3)
+    cv2.line(target, (5, 60), (84, 10), (230, 40, 40), 4)
+    initial = background.copy()
+    initial[240:312, 500:592] = target
+
+    transform = cv2.getRotationMatrix2D((46, 36), 5.0, 1.0)
+    changed_target = cv2.warpAffine(
+        target,
+        transform,
+        (92, 72),
+        borderMode=cv2.BORDER_REFLECT,
+    )
+    changed_target = cv2.GaussianBlur(changed_target, (5, 5), 0)
+    reappeared = background.copy()
+    reappeared[35:107, 45:137] = changed_target
+
+    engine = TrackingEngine(load_config())
+    engine.begin_selection(metadata(0))
+    identity = engine.initialize(initial, (500, 240, 92, 72), metadata(0))
+    _matches, accepted = engine.candidate_matcher.find(
+        reappeared,
+        identity,
+        (500, 240, 92, 72),
+    )
+    assert accepted is not None
+    assert 0.76 <= accepted.appearance_similarity <= 0.82
+    engine.short_tracker.update = lambda _frame: (False, None)  # type: ignore[method-assign]
+
+    results = [
+        engine.update(reappeared, metadata(frame_number))
+        for frame_number in range(1, 4)
+    ]
+
+    assert results[0].candidate_box is not None
+    assert results[-1].state == TrackingState.LOCKED
+    assert results[-1].box is not None
+    assert results[-1].box[0] < 100
+
+
 def test_two_equally_plausible_full_frame_targets_are_rejected() -> None:
     generator = np.random.default_rng(358)
     background = generator.integers(0, 30, (360, 640, 3), dtype=np.uint8)

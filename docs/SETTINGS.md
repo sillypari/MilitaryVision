@@ -76,6 +76,22 @@ tracking:
 
 The profile has no effect when KCF or MIL is selected.
 
+The balanced identity-continuation defaults tolerate short camera blur and
+lighting changes without allowing those weak frames to update identity memory:
+
+```yaml
+tracking:
+  locked_minimum: 0.66
+  minimum_identity_confidence: 0.54
+  locked_exit_identity_confidence: 0.42
+  locked_exit_tracking_quality: 0.68
+  weak_observation_grace_frames: 12
+```
+
+Increase these thresholds when the short tracker follows visually similar
+objects incorrectly. Reduce them only in small increments when the correct
+target is being dropped despite stable shape, size, and tracking quality.
+
 ### Reacquisition
 
 For faster full-frame relock:
@@ -102,21 +118,32 @@ The proposal templates are the protected original and the newest high-confidence
 reference. Final candidate verification also uses colour and the stored identity
 history.
 
-In full-frame mode, the last position does not contribute to the acceptance
-score. This allows a verified target to move between opposite parts of the frame.
-The application still rejects the match when appearance is insufficient, when
-another candidate has a similar identity score, or until the configured number
-of consecutive confirmations has been observed.
+In full-frame mode, distant candidates receive a neutral motion value rather
+than a proximity penalty. This allows a verified target to move between opposite
+parts of the frame. Nearby motion can contribute a small ranking advantage, but
+it cannot prevent a strong distant identity match. The application still rejects
+the match when appearance is insufficient, when another candidate has a similar
+score, or until the configured number of consecutive confirmations has been
+observed.
 
-`full_frame_motion_floor` affects the motion-consistency diagnostic immediately
-after a distant relock. It does not limit where the target may be accepted.
+The balanced relock defaults are:
+
+```yaml
+reidentification:
+  minimum_match_score: 0.74
+  full_frame_minimum_appearance_score: 0.76
+  full_frame_motion_floor: 0.75
+  full_frame_ambiguity_margin: 0.06
+  consecutive_confirmations: 3
+```
 
 For fewer false relocks, increase these cautiously:
 
 ```yaml
 reidentification:
-  full_frame_minimum_appearance_score: 0.86
-  ambiguity_margin: 0.15
+  minimum_match_score: 0.78
+  full_frame_minimum_appearance_score: 0.82
+  full_frame_ambiguity_margin: 0.10
   consecutive_confirmations: 4
 ```
 

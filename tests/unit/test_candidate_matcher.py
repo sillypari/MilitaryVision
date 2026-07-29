@@ -7,7 +7,6 @@ from persistent_tracker.domain.models import CandidateMatch
 from persistent_tracker.tracking.candidate_matcher import (
     choose_unambiguous_candidate,
     combined_candidate_score,
-    identity_candidate_score,
 )
 
 
@@ -66,19 +65,6 @@ def test_appearance_gate_cannot_be_overridden_by_combined_score() -> None:
     ) is None
 
 
-def test_full_frame_identity_score_does_not_include_distance() -> None:
-    config = load_config().reidentification
-    score = identity_candidate_score(
-        appearance_similarity=0.90,
-        shape_similarity=1.0,
-        colour_similarity=0.40,
-        size_similarity=1.0,
-        config=config,
-    )
-
-    assert score == pytest.approx(0.86)
-
-
 def test_full_frame_selection_can_disable_motion_gate() -> None:
     config = replace(
         load_config().reidentification,
@@ -95,3 +81,21 @@ def test_full_frame_selection_can_disable_motion_gate() -> None:
     )
 
     assert selected is distant
+
+
+def test_full_frame_can_use_temporally_safe_ambiguity_margin() -> None:
+    config = replace(
+        load_config().reidentification,
+        minimum_match_score=0.75,
+    )
+    best = candidate(1, 0.86)
+    second = candidate(2, 0.79)
+
+    assert choose_unambiguous_candidate([best, second], config) is None
+    selected = choose_unambiguous_candidate(
+        [best, second],
+        config,
+        ambiguity_margin=config.full_frame_ambiguity_margin,
+    )
+
+    assert selected is best
