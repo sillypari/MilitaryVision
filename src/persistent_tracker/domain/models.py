@@ -53,6 +53,7 @@ class IdentityReference:
     confidence: float
     blur_variance: float
     is_original: bool = False
+    is_anchor: bool = False
 
 
 @dataclass(slots=True)
@@ -101,6 +102,12 @@ class CandidateMatch:
     shape_similarity: float
     size_similarity: float
     combined_score: float
+    anchor_similarity: float = 0.0
+    adaptive_similarity: float = 0.0
+    anchor_best_similarity: float = 0.0
+    feature_verification_available: bool = False
+    feature_matches: int = 0
+    feature_inlier_ratio: float = 0.0
 
 
 @dataclass(slots=True)

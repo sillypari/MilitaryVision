@@ -52,3 +52,26 @@ def test_reacquired_segment_can_be_marked_as_a_new_path() -> None:
 
     assert reacquired.segment_start
     assert trajectory.path_length_pixels == 0.0
+
+
+def test_visible_points_use_lifetime_without_deleting_export_history() -> None:
+    trajectory = Trajectory(maximum_points=10)
+    trajectory.append(point(0, False))
+    trajectory.append(point(2, False))
+    trajectory.append(point(4, False))
+
+    visible = trajectory.visible_points(
+        current_timestamp=5.0,
+        lifetime_seconds=2.5,
+    )
+
+    assert [item.timestamp for item in visible] == [4]
+    assert [item.timestamp for item in trajectory.points] == [0, 2, 4]
+
+
+def test_zero_lifetime_hides_trail_without_deleting_history() -> None:
+    trajectory = Trajectory(maximum_points=10)
+    trajectory.append(point(0, False))
+
+    assert trajectory.visible_points(1.0, 0.0) == []
+    assert len(trajectory.points) == 1

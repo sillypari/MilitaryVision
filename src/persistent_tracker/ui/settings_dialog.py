@@ -53,6 +53,269 @@ def score(path: str, label: str, tooltip: str = "") -> FieldSpec:
     return FieldSpec(path, label, "float", 0.0, 1.0, 0.01, 2, tooltip=tooltip)
 
 
+SETTING_DIRECTION_HELP: dict[str, str] = {
+    "video.processing_width": (
+        "Lower: faster processing with less small-target detail. "
+        "Higher: more detail with greater CPU cost."
+    ),
+    "video.processing_height": (
+        "Lower: faster processing with less small-target detail. "
+        "Higher: more detail with greater CPU cost."
+    ),
+    "video.reconnect_attempts": (
+        "Reserved for the planned stream-reconnection worker; it does not yet "
+        "change MVP behavior."
+    ),
+    "video.default_camera_index": (
+        "Selects which numbered local camera opens by default."
+    ),
+    "video.mirror_camera_default": (
+        "Enabled mirrors local cameras like a selfie view. It does not mirror files "
+        "or network streams."
+    ),
+    "tracking.preferred_tracker": (
+        "CSRT is the robust default. KCF is usually faster but weaker on scale "
+        "changes. MIL is retained for compatibility testing."
+    ),
+    "tracking.csrt_profile": (
+        "Accurate uses more CPU. Balanced reduces cost while retaining scale and "
+        "segmentation signals. Fast trades additional robustness for speed."
+    ),
+    "tracking.locked_minimum": (
+        "Lower: keeps CONFIRMED with weaker combined evidence. "
+        "Higher: drops uncertain locks sooner."
+    ),
+    "tracking.minimum_identity_confidence": (
+        "Lower: accepts larger appearance changes but increases identity-switch risk. "
+        "Higher: requires a closer identity match."
+    ),
+    "tracking.minimum_tracking_quality": (
+        "Lower: tolerates less consistent motion and visibility. "
+        "Higher: requires stronger tracker and motion agreement."
+    ),
+    "tracking.locked_exit_identity_confidence": (
+        "Lower: remains locked through weaker appearance evidence. "
+        "Higher: enters identity search sooner."
+    ),
+    "tracking.locked_exit_tracking_quality": (
+        "Lower: tolerates abrupt motion and blur longer. "
+        "Higher: rejects unstable tracking sooner."
+    ),
+    "tracking.weak_observation_grace_frames": (
+        "Lower: starts reacquisition sooner. Higher: bridges weak frames longer, "
+        "with greater drift risk. Weak frames never update identity memory."
+    ),
+    "tracking.appearance_override_identity_confidence": (
+        "Lower: the fast-jink override accepts weaker identity evidence. "
+        "Higher: makes the override more conservative."
+    ),
+    "tracking.appearance_override_template_similarity": (
+        "Lower: tolerates a less similar target crop during a jink. "
+        "Higher: demands a closer template match."
+    ),
+    "tracking.appearance_override_tracking_quality": (
+        "Lower: lets appearance override poorer motion quality. "
+        "Higher: still requires stable tracking evidence."
+    ),
+    "tracking.prediction_maximum_outside_ratio": (
+        "Lower: hides a predicted box sooner near frame edges. "
+        "Higher: allows more of the predicted box outside the image."
+    ),
+    "tracking.occlusion_threshold": (
+        "Lower: tolerates weaker combined evidence before leaving CONFIRMED. "
+        "Higher: marks possible occlusion sooner."
+    ),
+    "tracking.lost_threshold": (
+        "Reserved compatibility threshold; the current MVP uses bounded "
+        "reacquisition time to enter LOST."
+    ),
+    "tracking.maximum_prediction_frames": (
+        "Lower: stops showing motion prediction sooner. "
+        "Higher: predicts for more frames before scene search."
+    ),
+    "tracking.maximum_prediction_seconds": (
+        "Lower: shorter predicted-location window. "
+        "Higher: keeps prediction active longer."
+    ),
+    "tracking.maximum_reacquisition_frames": (
+        "Lower: declares LOST after fewer search frames. "
+        "Higher: remains REACQUIRING longer."
+    ),
+    "tracking.maximum_reacquisition_seconds": (
+        "Lower: reaches LOST sooner by elapsed time. "
+        "Higher: searches longer before LOST."
+    ),
+    "tracking.maximum_speed_px_per_second": (
+        "Reserved for expanded motion gating; the current MVP does not enforce "
+        "this limit."
+    ),
+    "reidentification.appearance_weight": (
+        "Lower: appearance contributes less to candidate ranking. "
+        "Higher: visual similarity contributes more. All five weights must total 1."
+    ),
+    "reidentification.motion_weight": (
+        "Lower: position and motion contribute less. Higher: nearby plausible motion "
+        "matters more. All five weights must total 1."
+    ),
+    "reidentification.shape_weight": (
+        "Lower: aspect-ratio similarity contributes less. Higher: shape contributes "
+        "more. All five weights must total 1."
+    ),
+    "reidentification.colour_weight": (
+        "Lower: colour contributes less. Higher: colour contributes more and may be "
+        "sensitive to lighting. All five weights must total 1."
+    ),
+    "reidentification.size_weight": (
+        "Lower: size contributes less. Higher: similar scale matters more. "
+        "All five weights must total 1."
+    ),
+    "reidentification.minimum_match_score": (
+        "Lower: easier and faster relock with greater false-relock risk. "
+        "Higher: stronger total evidence is required."
+    ),
+    "reidentification.minimum_appearance_score": (
+        "Lower: local candidates may look less similar. "
+        "Higher: local reacquisition is more conservative."
+    ),
+    "reidentification.ambiguity_margin": (
+        "Lower: accepts candidates with closer competing scores. "
+        "Higher: requires a clearer winner."
+    ),
+    "reidentification.consecutive_confirmations": (
+        "Lower: relocks in fewer frames with more one-frame error risk. "
+        "Higher: relocks more slowly but verifies consistency longer."
+    ),
+    "reidentification.local_search_radius": (
+        "Lower: faster search near the prediction. "
+        "Higher: covers larger jumps with more CPU cost."
+    ),
+    "reidentification.last_position_search_multiplier": (
+        "Lower: keeps the last-position search tighter. "
+        "Higher: expands it farther around the last confirmed point."
+    ),
+    "reidentification.full_frame_search_after_frames": (
+        "Lower: begins whole-frame search sooner and uses more CPU. "
+        "Higher: stays local longer. Zero searches the full frame immediately."
+    ),
+    "reidentification.full_frame_motion_floor": (
+        "Lower: distant candidates receive less motion credit. "
+        "Higher: distance matters less during whole-frame search."
+    ),
+    "reidentification.full_frame_minimum_appearance_score": (
+        "Lower: distant relocks are easier but riskier. "
+        "Higher: requires stronger visual identity evidence."
+    ),
+    "reidentification.full_frame_processing_width": (
+        "Lower: faster whole-frame scanning but may miss small targets. "
+        "Higher: retains more detail with greater CPU cost."
+    ),
+    "reidentification.full_frame_max_reference_templates": (
+        "Lower: faster search with fewer viewpoints. "
+        "Higher: more viewpoint coverage with greater CPU cost."
+    ),
+    "reidentification.full_frame_ambiguity_margin": (
+        "Lower: accepts closer whole-frame competitors. "
+        "Higher: requires a clearer distant-candidate winner."
+    ),
+    "reidentification.lost_search_interval_frames": (
+        "Lower: scans more often for quicker relock with higher CPU use. "
+        "One searches every processed frame and is recommended for live tracking."
+    ),
+    "reidentification.confirmation_grace_frames": (
+        "Lower: resets verification sooner after an ambiguous frame. Higher: keeps "
+        "the same-location hypothesis longer. Ambiguous frames never count as "
+        "positive identity confirmations."
+    ),
+    "reidentification.anchor_consensus_references": (
+        "Lower: one strong anchor can dominate. Higher: more immutable views must "
+        "agree, reducing false relocks but rejecting larger appearance changes."
+    ),
+    "reidentification.feature_verification_enabled": (
+        "Enabled checks ORB feature layout against immutable anchors when both crops "
+        "contain enough texture. Textureless targets continue using other signals."
+    ),
+    "reidentification.feature_minimum_keypoints": (
+        "Lower: enables feature verification on simpler targets. Higher: requires "
+        "richer texture before the feature gate is considered reliable."
+    ),
+    "reidentification.feature_minimum_matches": (
+        "Lower: accepts fewer corresponding local details. Higher: reduces false "
+        "matches but may reject small, blurred, or rotated targets."
+    ),
+    "reidentification.feature_minimum_inlier_ratio": (
+        "Lower: tolerates less geometric agreement. Higher: requires more matched "
+        "details to fit one consistent target transformation."
+    ),
+    "reidentification.original_anchor_weight": (
+        "Lower: adaptive references influence reacquisition more. Higher: immutable "
+        "early identity anchors dominate reacquisition. This does not change normal "
+        "CSRT continuity scoring."
+    ),
+    "reidentification.full_frame_minimum_anchor_similarity": (
+        "Lower: permits weaker agreement with the immutable original-frame anchors. "
+        "Higher: reduces drift risk but may reject large appearance changes."
+    ),
+    "identity_memory.trusted_reference_weight": (
+        "Lower: anchors identity more strongly to the original selection. "
+        "Higher: adapts more to verified scale and viewpoint changes, with greater "
+        "identity-drift risk."
+    ),
+    "identity_memory.minimum_update_confidence": (
+        "Lower: learns new appearances more easily with greater drift risk. "
+        "Higher: stores only stronger observations."
+    ),
+    "identity_memory.maximum_references": (
+        "Lower: less viewpoint history and lower comparison cost. "
+        "Higher: more historical views and greater CPU and memory use."
+    ),
+    "identity_memory.minimum_reference_interval_seconds": (
+        "Lower: stores trusted views more frequently. "
+        "Higher: spaces normal reference updates farther apart."
+    ),
+    "identity_memory.bootstrap_reference_count": (
+        "Lower: switches to the normal update interval sooner. "
+        "Higher: collects more early references at the bootstrap cadence."
+    ),
+    "identity_memory.bootstrap_reference_interval_seconds": (
+        "Lower: collects initial trusted views faster. "
+        "Higher: spaces initial views farther apart."
+    ),
+    "identity_memory.anchor_reference_count": (
+        "Lower: keeps fewer immutable early views. Higher: protects more initial "
+        "confirmed views from adaptive-memory rotation, using more memory and "
+        "comparison work."
+    ),
+    "identity_memory.minimum_blur_variance": (
+        "Lower: allows softer images into memory. "
+        "Higher: requires sharper reference crops."
+    ),
+    "identity_memory.maximum_outside_ratio": (
+        "Lower: references must be more fully inside the frame. "
+        "Higher: allows more clipped target area into memory."
+    ),
+    "trajectory.maximum_points": (
+        "Lower: retains fewer trajectory samples. "
+        "Higher: retains more export history and uses more memory."
+    ),
+    "trajectory.include_predictions": (
+        "Enabled records predicted points during short occlusions. "
+        "Predicted segments remain visually distinct and do not count as confirmed path."
+    ),
+    "trajectory.fade_after_seconds": (
+        "Lower: the on-screen trail disappears sooner. Higher: it remains visible "
+        "longer. Zero hides the on-screen trail. Export history is unaffected."
+    ),
+    "export.default_fps": (
+        "Lower or higher values change fallback recording playback speed when the "
+        "source does not report a usable FPS."
+    ),
+    "export.video_codec": (
+        "Selects the four-character OpenCV recording codec. Availability depends on "
+        "the installed video backend."
+    ),
+}
+
+
 FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
     "Video": (
         FieldSpec("video.processing_width", "Processing width", "int", 320, 3840, 16),
@@ -230,8 +493,9 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
             8,
             1,
             tooltip=(
-                "Uses the protected original plus the newest references. "
-                "Final identity verification still uses identity memory."
+                "Always uses the protected original, reserves one slot for the "
+                "newest adaptive view when available, then uses early anchors. "
+                "Final verification still enforces the anchor floor."
             ),
         ),
         score(
@@ -254,8 +518,77 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
                 "Lower values relock sooner but use more CPU."
             ),
         ),
+        FieldSpec(
+            "reidentification.confirmation_grace_frames",
+            "Verification ambiguity grace (frames)",
+            "int",
+            0,
+            30,
+            1,
+            tooltip=(
+                "Retains a strong same-location candidate briefly when one frame "
+                "is ambiguous. Only fully accepted frames increase verification."
+            ),
+        ),
+        FieldSpec(
+            "reidentification.anchor_consensus_references",
+            "Anchor consensus references",
+            "int",
+            1,
+            8,
+            1,
+        ),
+        FieldSpec(
+            "reidentification.feature_verification_enabled",
+            "Feature-geometry verification",
+            "bool",
+        ),
+        FieldSpec(
+            "reidentification.feature_minimum_keypoints",
+            "Feature minimum keypoints",
+            "int",
+            4,
+            500,
+            1,
+        ),
+        FieldSpec(
+            "reidentification.feature_minimum_matches",
+            "Feature minimum matches",
+            "int",
+            4,
+            200,
+            1,
+        ),
+        score(
+            "reidentification.feature_minimum_inlier_ratio",
+            "Feature minimum inlier ratio",
+        ),
+        score(
+            "reidentification.original_anchor_weight",
+            "Original-anchor reacquisition weight",
+            (
+                "Applies only to candidate reacquisition. Normal locked tracking "
+                "continues using the trusted recent-reference weight."
+            ),
+        ),
+        score(
+            "reidentification.full_frame_minimum_anchor_similarity",
+            "Full-frame minimum anchor similarity",
+            (
+                "A full-frame candidate must pass this immutable-anchor floor even "
+                "when a recent adaptive reference matches strongly."
+            ),
+        ),
     ),
     "Identity memory": (
+        score(
+            "identity_memory.trusted_reference_weight",
+            "Trusted recent-reference weight",
+            (
+                "Balances the protected original against high-confidence historical "
+                "views. Higher values handle large scale and viewpoint changes better."
+            ),
+        ),
         score(
             "identity_memory.minimum_update_confidence",
             "Reference update confidence",
@@ -295,6 +628,14 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
             2,
         ),
         FieldSpec(
+            "identity_memory.anchor_reference_count",
+            "Immutable anchor references",
+            "int",
+            1,
+            20,
+            1,
+        ),
+        FieldSpec(
             "identity_memory.minimum_blur_variance",
             "Minimum sharpness variance",
             "float",
@@ -324,7 +665,7 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
         ),
         FieldSpec(
             "trajectory.fade_after_seconds",
-            "Trajectory fade time (s)",
+            "On-screen trail lifetime (s)",
             "float",
             0.0,
             3600.0,
@@ -364,7 +705,8 @@ class SettingsDialog(QDialog):
         title = QLabel("Tracking settings")
         title.setObjectName("title")
         description = QLabel(
-            "Changes reset the active target. Export templates to preserve tuned profiles."
+            "Changes reset the active target. Hover a setting name or value for "
+            "lower-versus-higher guidance."
         )
         description.setObjectName("subtitle")
         root.addWidget(title)
@@ -408,10 +750,16 @@ class SettingsDialog(QDialog):
         form.setVerticalSpacing(10)
         for spec in fields:
             widget = self._create_widget(spec)
-            if spec.tooltip:
-                widget.setToolTip(spec.tooltip)
+            guidance = SETTING_DIRECTION_HELP.get(spec.path, "")
+            tooltip = " ".join(
+                part for part in (spec.tooltip, guidance) if part
+            )
+            label = QLabel(spec.label)
+            if tooltip:
+                widget.setToolTip(tooltip)
+                label.setToolTip(tooltip)
             self.widgets[spec.path] = widget
-            form.addRow(spec.label, widget)
+            form.addRow(label, widget)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)

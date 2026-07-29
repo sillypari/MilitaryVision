@@ -28,15 +28,18 @@ or autonomous decision functionality.
 ## What the MVP supports
 
 - Local MP4, MKV, AVI, MOV, and other OpenCV-readable video files
+- Local-video timeline with drag, click, and keyboard seeking
 - Laptop webcams and USB cameras
 - RTSP, HTTP, and IP-camera URLs supported by the installed OpenCV backend
 - Mouse-drawn target selection with explicit confirmation and cancellation
 - CSRT, KCF, or MIL short-term tracking
 - Accurate, Balanced, and Fast CSRT performance profiles
 - A persistent internal identity independent of an external tracker ID
+- Adaptive fusion of the protected original and trusted multi-view references
 - Appearance, colour, shape, size, motion, and visibility confidence signals
 - Full-frame identity reacquisition after large or unpredictable movement
-- Continued low-frequency whole-frame identity search after the target is lost
+- Continued whole-frame identity search after the target is lost, every
+  processed frame by default for live use
 - Multi-frame verification and ambiguity rejection before relocking
 - Kalman-based motion prediction during short occlusions
 - Clearly different confirmed, predicted, unverified, and lost overlays
@@ -62,8 +65,8 @@ flowchart LR
     D -->|Verified| E[Locked]
     D -->|Insufficient evidence| F[Occluded or reacquiring]
     F --> G[Whole-frame candidate search]
-    G --> H[Appearance, colour, shape and size checks]
-    H --> I[Ambiguity rejection]
+    G --> H[Immutable anchor and adaptive appearance checks]
+    H --> I[Feature geometry and ambiguity rejection]
     I --> J[Multi-frame confirmation]
     J -->|Verified| E
     J -->|Uncertain| K[Lost]
@@ -75,6 +78,13 @@ Additional references are added only from sharp, in-frame, high-confidence
 observations. Low-confidence, occluded, or predicted frames never update identity
 memory.
 
+The exact original and first verified early views form an immutable anchor bank.
+Later trusted references rotate separately. During normal CSRT tracking, a
+configurable trusted-reference weight lets verified historical views carry more
+evidence after large scale or viewpoint changes. During reacquisition, a separate
+original-anchor-heavy weight and mandatory anchor-similarity floor prevent a
+recent adaptive view from authorizing a relock by itself.
+
 When local tracking fails, the proposal stage searches a scaled copy of the
 entire frame for CPU efficiency. Candidate coordinates are mapped back to the
 normal processing resolution and verified against the original frame. Distance
@@ -85,13 +95,39 @@ of the image.
 
 A full-frame candidate is accepted only when:
 
-1. Appearance evidence exceeds the stronger full-frame threshold.
-2. The identity score exceeds the configured match threshold.
-3. The leading candidate is sufficiently better than the second candidate.
-4. The same candidate remains consistent for multiple frames.
+1. It resembles at least one immutable original-frame anchor.
+2. Multiple immutable anchors agree when enough early anchors exist.
+3. ORB feature geometry agrees when both crops contain sufficient texture.
+4. Anchor-heavy combined appearance exceeds the full-frame threshold.
+5. The identity score exceeds the configured match threshold.
+6. The leading candidate is sufficiently better than the second candidate.
+7. The same candidate earns multiple positive confirmations.
+
+A brief ambiguous frame may preserve the same-location hypothesis, but it never
+counts as a positive confirmation.
 
 Two equally plausible objects therefore cause an uncertain or lost state rather
 than an arbitrary identity switch.
+
+### Current V4 live-reacquisition behavior
+
+The default live profile performs a whole-frame search on every processed frame
+while the target is lost. Camera sources also request a one-frame backend buffer
+to reduce the chance of verifying stale frames. Recorded-video templates may use
+a slower configurable cadence when throughput is more important than immediate
+relock.
+
+Fast searching does not weaken identity verification. A candidate still needs
+the configured anchor evidence, feature-geometry evidence when available,
+ambiguity margin, and consecutive positive confirmations. Brief ambiguity may
+hold a candidate in `UNVERIFIED`, but ambiguous frames do not count toward a
+confirmed relock.
+
+The status panel exposes the number of immutable identity anchors, the current
+ReID verification progress, and feature-geometry evidence. Letting a newly
+selected target remain clearly visible for several strong frames gives the
+system an opportunity to preserve early scale or viewpoint anchors before the
+first occlusion.
 
 ## Tracking states
 
@@ -179,6 +215,13 @@ Changing mirror mode or applying new tracking settings clears the active target
 because both operations invalidate the coordinate or tracker state. Select the
 target again afterward.
 
+For local files, use the **VIDEO** timeline below the controls to move backward
+or forward. The time display shows the current and total video time. Seeking
+stops active recording and clears the selected target because a discontinuous
+frame jump invalidates tracker, motion, and identity-continuity state. Select the
+target again at the new position. Cameras and network streams do not expose the
+timeline.
+
 ## Configuration
 
 The active settings are stored in:
@@ -195,15 +238,23 @@ configs/factory_defaults.yaml
 
 Use the in-application Settings dialog to change values. It validates related
 thresholds before saving and supports reusable YAML profile import and export.
+Hover a setting name or value for an explanation of what lower and higher values
+do.
 
 Important laptop settings:
 
-| Setting | Default | Effect |
+| Setting | Factory default | Effect |
 |---|---:|---|
 | `tracking.csrt_profile` | `BALANCED` | Controls normal locked-frame CPU cost |
 | `tracking.locked_minimum` | `0.66` | Minimum combined evidence for a strong locked observation |
 | `tracking.minimum_identity_confidence` | `0.54` | Minimum identity evidence for a strong locked observation |
 | `tracking.weak_observation_grace_frames` | `12` | Bridges short blur and lighting changes without updating identity memory |
+| `identity_memory.trusted_reference_weight` | `0.35` | Controls adaptation to verified scale and viewpoint changes while retaining the original |
+| `identity_memory.anchor_reference_count` | `3` | Protects the original and early verified views from memory rotation |
+| `reidentification.original_anchor_weight` | `0.70` | Makes reacquisition original-anchor-heavy without changing normal CSRT continuity |
+| `reidentification.full_frame_minimum_anchor_similarity` | `0.50` | Prevents an adaptive-only candidate from authorizing a relock |
+| `reidentification.anchor_consensus_references` | `2` | Prevents one unusually strong anchor from dominating |
+| `reidentification.feature_verification_enabled` | `true` | Checks local feature geometry for textured targets |
 | `video.processing_width` | `1280` | Maximum normal processing width |
 | `video.processing_height` | `720` | Maximum normal processing height |
 | `reidentification.full_frame_processing_width` | `640` | Controls whole-frame proposal cost |
@@ -212,7 +263,9 @@ Important laptop settings:
 | `reidentification.full_frame_minimum_appearance_score` | `0.76` | Rejects weak distant identity matches |
 | `reidentification.full_frame_ambiguity_margin` | `0.06` | Rejects similarly plausible full-frame candidates |
 | `reidentification.consecutive_confirmations` | `3` | Prevents one-frame relock decisions |
-| `reidentification.lost_search_interval_frames` | `3` | Controls background search cadence after the target is lost |
+| `reidentification.lost_search_interval_frames` | `1` | Searches every processed frame after loss for live-first recovery |
+| `reidentification.confirmation_grace_frames` | `2` | Preserves a strong same-location hypothesis through brief ambiguity without counting it |
+| `trajectory.fade_after_seconds` | `12.0` | Controls how many recent seconds of trail remain visible; `0` hides it |
 
 Recommended tuning order:
 
@@ -222,10 +275,26 @@ Recommended tuning order:
    `480`.
 4. Use `FAST` only when additional frame-rate headroom is more important than
    CSRT scale and segmentation robustness.
-5. Increase identity thresholds or confirmation count when similar objects cause
-   uncertain candidates.
+5. Raise the minimum anchor similarity before increasing every identity threshold
+   when adaptive-only distractors appear.
+6. Increase confirmation count when similar candidates remain ambiguous.
 
 See [Settings and templates](docs/SETTINGS.md) for all configuration behavior.
+
+The conservative CSRT behavior is preserved as:
+
+```text
+configs/templates/opencv4_csrt_tested_baseline.yaml
+```
+
+Import that template from Settings to return to the tested legacy reference
+weight and tracker thresholds.
+
+The F-16 experiment is available separately and is not activated automatically:
+
+```text
+configs/templates/f16_adaptive_identity.yaml
+```
 
 ## Exports and generated files
 
@@ -288,7 +357,15 @@ The suite covers:
 - Gradual motion, rotation, scale, and lighting changes
 - Confidence hysteresis and state transitions
 - Identity-memory update safeguards
+- Protected-original and trusted-reference fusion
+- Immutable early anchor-bank preservation
+- Rejection of adaptive-only full-frame candidates
+- ORB feature-geometry verification for textured targets
+- Ambiguous-frame confirmation grace without false confirmation progress
+- Live camera buffer configuration and every-frame lost-target search
+- Stream-credential redaction in logs
 - Geometry, trajectory, source, UI-selection, settings, and export behavior
+- Local-video timeline seeking and temporal-state invalidation
 
 ## Project structure
 
@@ -321,8 +398,9 @@ Verification may become impossible when the target remains outside the frame,
 is hidden for a long period, becomes too small or blurred, changes appearance
 completely, or is indistinguishable from another object during a full occlusion.
 MilitaryVision reports that uncertainty instead of fabricating confidence. It
-continues periodic whole-frame searches while the source is running, but it
-cannot recover until the stored identity can be verified again.
+continues configurable whole-frame searches while the source is running
+(every processed frame in the default live profile), but it cannot recover
+until the stored identity can be verified again.
 
 The current template and colour identity model is intentionally lightweight. It
 is effective for an MVP but is not equivalent to a learned general-purpose ReID
@@ -351,6 +429,7 @@ not merely the duration of continuous tracking.
 - [Development plan](docs/DEVELOPMENT_PLAN.md)
 - [Settings and templates](docs/SETTINGS.md)
 - [SAM 2 requirements and integration plan](docs/SAM2_REQUIREMENTS.md)
+- [Benchmarking and OpenCV migration results](docs/BENCHMARKING.md)
 
 Contributions should preserve the identity-first rule, keep confirmed
 observations separate from predictions, and include tests for any change to

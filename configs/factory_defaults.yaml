@@ -49,9 +49,19 @@ reidentification:
   full_frame_processing_width: 640
   full_frame_max_reference_templates: 2
   full_frame_ambiguity_margin: 0.06
-  lost_search_interval_frames: 3
+  lost_search_interval_frames: 1
+  original_anchor_weight: 0.70
+  full_frame_minimum_anchor_similarity: 0.50
+  confirmation_grace_frames: 2
+  anchor_consensus_references: 2
+  feature_verification_enabled: true
+  feature_minimum_keypoints: 12
+  feature_minimum_matches: 8
+  feature_minimum_inlier_ratio: 0.35
 
 identity_memory:
+  trusted_reference_weight: 0.35
+  anchor_reference_count: 3
   minimum_update_confidence: 0.74
   maximum_references: 8
   minimum_reference_interval_seconds: 0.50

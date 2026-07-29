@@ -16,6 +16,17 @@ class Trajectory:
     def clear(self) -> None:
         self.points.clear()
 
+    def visible_points(
+        self,
+        current_timestamp: float,
+        lifetime_seconds: float,
+    ) -> list[TrajectoryPoint]:
+        """Return the recent display window without deleting export history."""
+        if lifetime_seconds <= 0.0:
+            return []
+        cutoff = current_timestamp - lifetime_seconds
+        return [point for point in self.points if point.timestamp >= cutoff]
+
     @property
     def path_length_pixels(self) -> float:
         total = 0.0

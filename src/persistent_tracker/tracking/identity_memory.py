@@ -43,6 +43,7 @@ class IdentityMemory:
             confidence=1.0,
             blur_variance=sharpness,
             is_original=True,
+            is_anchor=True,
         )
         center = box_center(box)
         return TargetIdentity(
@@ -68,8 +69,7 @@ class IdentityMemory:
             histogram_similarity(reference.histogram, candidate_histogram)
             for reference in identity.references[1:]
         ]
-        recent_score = max(historical_scores, default=original_score)
-        return 0.65 * original_score + 0.35 * recent_score
+        return self._combine_reference_scores(original_score, historical_scores)
 
     def template_similarity(self, crop: np.ndarray, identity: TargetIdentity) -> float:
         if identity.original_crop is None:
@@ -79,8 +79,23 @@ class IdentityMemory:
             template_similarity(reference.crop, crop)
             for reference in identity.references[1:]
         ]
-        recent_score = max(historical_scores, default=original_score)
-        return 0.65 * original_score + 0.35 * recent_score
+        return self._combine_reference_scores(original_score, historical_scores)
+
+    def _combine_reference_scores(
+        self,
+        original_score: float,
+        historical_scores: list[float],
+    ) -> float:
+        """Fuse the protected original with trusted high-confidence viewpoints."""
+        if not historical_scores:
+            return original_score
+        trusted_score = max(historical_scores)
+        trusted_weight = self.config.trusted_reference_weight
+        adapted_score = (
+            (1.0 - trusted_weight) * original_score
+            + trusted_weight * trusted_score
+        )
+        return max(original_score, adapted_score)
 
     def maybe_add_reference(
         self,
@@ -120,9 +135,39 @@ class IdentityMemory:
             timestamp=metadata.timestamp,
             confidence=confidence,
             blur_variance=sharpness,
+            is_anchor=(
+                self.anchor_reference_count(identity)
+                < self.config.anchor_reference_count
+            ),
         )
         identity.references.append(reference)
 
         while len(identity.references) > self.config.maximum_references:
-            del identity.references[1]
+            removable_index = next(
+                (
+                    index
+                    for index, stored in enumerate(identity.references)
+                    if not stored.is_anchor
+                ),
+                None,
+            )
+            if removable_index is None:
+                break
+            del identity.references[removable_index]
         return True
+
+    @staticmethod
+    def anchor_references(identity: TargetIdentity) -> list[IdentityReference]:
+        return [reference for reference in identity.references if reference.is_anchor]
+
+    @staticmethod
+    def adaptive_references(identity: TargetIdentity) -> list[IdentityReference]:
+        return [
+            reference
+            for reference in identity.references
+            if not reference.is_anchor
+        ]
+
+    @classmethod
+    def anchor_reference_count(cls, identity: TargetIdentity) -> int:
+        return len(cls.anchor_references(identity))

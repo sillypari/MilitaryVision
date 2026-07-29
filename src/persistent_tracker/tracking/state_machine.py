@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 from persistent_tracker.domain.models import StateTransition, TrackingState
+
+LOGGER = logging.getLogger(__name__)
 
 
 class InvalidStateTransition(ValueError):
@@ -75,6 +79,13 @@ class TrackingStateMachine:
         )
         self.state = new_state
         self.transitions.append(transition)
+        LOGGER.info(
+            "Tracking state transition frame=%s previous=%s new=%s reason=%s",
+            frame_number,
+            transition.previous_state.value,
+            transition.new_state.value,
+            reason,
+        )
         return transition
 
     def reset(self, *, frame_number: int, timestamp: float, reason: str) -> None:

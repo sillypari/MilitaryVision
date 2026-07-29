@@ -9,16 +9,17 @@ video:
   mirror_camera_default: true
 tracking:
   preferred_tracker: CSRT
+  csrt_profile: ACCURATE
   locked_minimum: 0.66
   minimum_identity_confidence: 0.54
   minimum_tracking_quality: 0.55
   locked_exit_identity_confidence: 0.42
   locked_exit_tracking_quality: 0.68
   weak_observation_grace_frames: 12
-  appearance_override_identity_confidence: 0.56
+  appearance_override_identity_confidence: 0.55
   appearance_override_template_similarity: 0.48
-  appearance_override_tracking_quality: 0.6
-  prediction_maximum_outside_ratio: 0.5
+  appearance_override_tracking_quality: 0.60
+  prediction_maximum_outside_ratio: 0.50
   occlusion_threshold: 0.42
   lost_threshold: 0.22
   maximum_prediction_frames: 30
@@ -27,18 +28,17 @@ tracking:
   maximum_reacquisition_seconds: 8.0
   search_area_growth: 1.15
   maximum_speed_px_per_second: 1600.0
-  csrt_profile: ACCURATE
 reidentification:
   appearance_weight: 0.45
   motion_weight: 0.25
-  shape_weight: 0.1
-  colour_weight: 0.1
-  size_weight: 0.1
+  shape_weight: 0.10
+  colour_weight: 0.10
+  size_weight: 0.10
   minimum_match_score: 0.74
   minimum_appearance_score: 0.68
   ambiguity_margin: 0.12
-  consecutive_confirmations: 2
-  local_search_radius: 236
+  consecutive_confirmations: 3
+  local_search_radius: 180
   last_position_search_multiplier: 1.25
   full_frame_search_after_frames: 0
   full_frame_motion_floor: 0.75
@@ -46,9 +46,9 @@ reidentification:
   full_frame_processing_width: 640
   full_frame_max_reference_templates: 2
   full_frame_ambiguity_margin: 0.06
-  lost_search_interval_frames: 1
-  original_anchor_weight: 0.7
-  full_frame_minimum_anchor_similarity: 0.5
+  lost_search_interval_frames: 3
+  original_anchor_weight: 0.70
+  full_frame_minimum_anchor_similarity: 0.50
   confirmation_grace_frames: 2
   anchor_consensus_references: 2
   feature_verification_enabled: true
@@ -56,19 +56,19 @@ reidentification:
   feature_minimum_matches: 8
   feature_minimum_inlier_ratio: 0.35
 identity_memory:
+  trusted_reference_weight: 0.35
+  anchor_reference_count: 3
   minimum_update_confidence: 0.74
   maximum_references: 8
-  minimum_reference_interval_seconds: 0.5
+  minimum_reference_interval_seconds: 0.50
   bootstrap_reference_count: 3
   bootstrap_reference_interval_seconds: 0.05
   minimum_blur_variance: 45.0
   maximum_outside_ratio: 0.05
-  trusted_reference_weight: 0.35
-  anchor_reference_count: 3
 trajectory:
   maximum_points: 1000
   include_predictions: true
-  fade_after_seconds: 2.0
+  fade_after_seconds: 12.0
 export:
   default_fps: 30.0
   video_codec: mp4v

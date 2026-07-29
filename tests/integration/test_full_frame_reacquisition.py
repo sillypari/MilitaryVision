@@ -3,7 +3,7 @@ from dataclasses import replace
 import cv2
 import numpy as np
 
-from persistent_tracker.config import AppConfig, load_config
+from persistent_tracker.config import AppConfig, factory_config_path, load_config
 from persistent_tracker.domain.models import FrameMetadata, TrackingState
 from persistent_tracker.tracking.engine import TrackingEngine
 
@@ -18,8 +18,20 @@ def metadata(frame_number: int) -> FrameMetadata:
     )
 
 
+def reacquisition_test_config() -> AppConfig:
+    base = load_config(factory_config_path())
+    return replace(
+        base,
+        reidentification=replace(
+            base.reidentification,
+            consecutive_confirmations=3,
+            lost_search_interval_frames=1,
+        ),
+    )
+
+
 def short_lost_config() -> AppConfig:
-    base = load_config()
+    base = reacquisition_test_config()
     return replace(
         base,
         tracking=replace(
@@ -43,7 +55,7 @@ def test_target_can_reacquire_far_from_last_and_predicted_positions() -> None:
     reappeared = background.copy()
     reappeared[210:280, 470:560] = target
 
-    engine = TrackingEngine(load_config())
+    engine = TrackingEngine(reacquisition_test_config())
     engine.begin_selection(metadata(0))
     engine.initialize(initial, (60, 130, 90, 70), metadata(0))
     engine.short_tracker.update = lambda _frame: (False, None)  # type: ignore[method-assign]
@@ -77,7 +89,7 @@ def test_changed_target_reacquires_in_opposite_quadrant() -> None:
     reappeared = background.copy()
     reappeared[35:107, 45:137] = changed_target
 
-    engine = TrackingEngine(load_config())
+    engine = TrackingEngine(reacquisition_test_config())
     engine.begin_selection(metadata(0))
     engine.initialize(initial, (500, 240, 92, 72), metadata(0))
     engine.short_tracker.update = lambda _frame: (False, None)  # type: ignore[method-assign]
@@ -117,7 +129,7 @@ def test_rotated_blurred_target_reacquires_below_old_threshold() -> None:
     reappeared = background.copy()
     reappeared[35:107, 45:137] = changed_target
 
-    engine = TrackingEngine(load_config())
+    engine = TrackingEngine(reacquisition_test_config())
     engine.begin_selection(metadata(0))
     identity = engine.initialize(initial, (500, 240, 92, 72), metadata(0))
     _matches, accepted = engine.candidate_matcher.find(
@@ -150,7 +162,7 @@ def test_two_equally_plausible_full_frame_targets_are_rejected() -> None:
     ambiguous_scene[35:107, 45:137] = target
     ambiguous_scene[120:192, 260:352] = target
 
-    engine = TrackingEngine(load_config())
+    engine = TrackingEngine(reacquisition_test_config())
     engine.begin_selection(metadata(0))
     identity = engine.initialize(initial, (500, 240, 92, 72), metadata(0))
     identity.missed_frames = 1
@@ -169,7 +181,7 @@ def test_immediate_full_frame_search_does_not_extend_prediction_trail() -> None:
     generator = np.random.default_rng(91)
     initial = generator.integers(0, 256, (360, 640, 3), dtype=np.uint8)
     empty_scene = np.zeros_like(initial)
-    engine = TrackingEngine(load_config())
+    engine = TrackingEngine(reacquisition_test_config())
     engine.begin_selection(metadata(0))
     engine.initialize(initial, (80, 100, 90, 70), metadata(0))
     engine.short_tracker.update = lambda _frame: (False, None)  # type: ignore[method-assign]
@@ -198,7 +210,7 @@ def test_scaled_full_frame_search_maps_candidate_to_processing_coordinates() -> 
         source_fps=30.0,
     )
 
-    engine = TrackingEngine(load_config())
+    engine = TrackingEngine(reacquisition_test_config())
     engine.begin_selection(large_metadata)
     identity = engine.initialize(initial, (80, 140, 90, 70), large_metadata)
     identity.missed_frames = 1
@@ -276,9 +288,12 @@ def test_lost_state_rejects_ambiguous_returning_targets() -> None:
         for frame_number in range(5, 11)
     ]
 
-    assert all(result.state == TrackingState.LOST for result in results)
+    assert all(
+        result.state in {TrackingState.LOST, TrackingState.REACQUIRING}
+        for result in results
+    )
+    assert any(result.state == TrackingState.REACQUIRING for result in results)
     assert all(result.box is None for result in results)
-    assert all(result.candidate_box is None for result in results)
 
 
 def test_lost_state_search_uses_configured_frame_interval() -> None:

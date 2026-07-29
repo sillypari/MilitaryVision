@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QSlider,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -42,6 +43,7 @@ from persistent_tracker.storage import AnnotatedVideoRecorder, export_csv, expor
 from persistent_tracker.tracking import TrackingEngine
 from persistent_tracker.ui.video_widget import VideoWidget
 from persistent_tracker.ui.settings_dialog import SettingsDialog
+from persistent_tracker.utils.timing import format_media_time
 from persistent_tracker.video import VideoSource, VideoSourceError
 
 LOGGER = logging.getLogger(__name__)
@@ -62,6 +64,9 @@ class MainWindow(QMainWindow):
         self.pending_selection: BoundingBox | None = None
         self.processing_fps = 0.0
         self._last_process_monotonic: float | None = None
+        self._timeline_dragging = False
+        self._timeline_was_playing = False
+        self._timeline_press_value = 0
 
         self.setWindowTitle(config.application.name)
         self.resize(1280, 780)
@@ -132,6 +137,8 @@ class MainWindow(QMainWindow):
             ("confidence", "Confidence"),
             ("identity", "Identity confidence"),
             ("quality", "Tracking quality"),
+            ("verification", "ReID verification"),
+            ("feature_geometry", "Feature geometry"),
             ("position", "Position"),
             ("velocity", "Velocity"),
             ("missed", "Missed frames"),
@@ -142,6 +149,7 @@ class MainWindow(QMainWindow):
             ("device", "Device"),
             ("identity_id", "Internal identity"),
             ("references", "References"),
+            ("anchors", "Identity anchors"),
             ("model", "Tracker"),
         ]
         for row, (key, name) in enumerate(rows):
@@ -220,6 +228,33 @@ class MainWindow(QMainWindow):
             tracking_row.addWidget(button)
         tracking_row.addStretch()
         outer.addLayout(tracking_row)
+
+        timeline_row = QHBoxLayout()
+        timeline_label = QLabel("VIDEO")
+        timeline_label.setObjectName("section")
+        self.timeline_slider = QSlider(Qt.Orientation.Horizontal)
+        self.timeline_slider.setRange(0, 0)
+        self.timeline_slider.setTracking(False)
+        self.timeline_slider.setEnabled(False)
+        self.timeline_slider.setToolTip(
+            "Seek through local video. Seeking clears active tracking because "
+            "temporal motion and identity state are no longer continuous."
+        )
+        self.timeline_slider.sliderPressed.connect(self._timeline_pressed)
+        self.timeline_slider.sliderMoved.connect(self._timeline_moved)
+        self.timeline_slider.sliderReleased.connect(self._timeline_released)
+        self.timeline_slider.valueChanged.connect(self._timeline_value_changed)
+        self.timeline_time_label = QLabel("00:00 / 00:00")
+        self.timeline_time_label.setObjectName("metricValue")
+        self.timeline_time_label.setMinimumWidth(112)
+        self.timeline_time_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        timeline_row.addWidget(timeline_label)
+        timeline_row.addWidget(self.timeline_slider, 1)
+        timeline_row.addWidget(self.timeline_time_label)
+        outer.addLayout(timeline_row)
+
         self.selection_notice = QLabel(
             "Selection inactive. Select a target to draw a box."
         )
@@ -274,6 +309,7 @@ class MainWindow(QMainWindow):
         try:
             self._stop_recording()
             self.source.open(source)
+            self._configure_timeline()
             self.engine = TrackingEngine(self.config)
             self.pending_selection = None
             self.video_widget.set_selection_enabled(False)
@@ -313,6 +349,10 @@ class MainWindow(QMainWindow):
         frame, metadata = packet
         self.current_frame = frame
         self.current_metadata = metadata
+        self._update_timeline_position(
+            metadata.frame_number,
+            metadata.timestamp,
+        )
         try:
             result = self.engine.update(frame, metadata)
         except Exception as error:
@@ -436,14 +476,129 @@ class MainWindow(QMainWindow):
         if not self.source.is_local_file or self.current_metadata is None:
             return
         self._pause()
-        if self.engine.state != TrackingState.IDLE:
-            self.engine.clear(self.current_metadata)
-            self.statusBar().showMessage(
-                "Tracking cleared because reverse seeking invalidates temporal state"
-            )
         target_frame = max(0, self.source.current_frame_number - 1)
-        if self.source.seek_frame(target_frame):
-            self._consume_next_frame()
+        self._seek_to_frame(target_frame, resume_playback=False)
+
+    def _configure_timeline(self) -> None:
+        self._timeline_dragging = False
+        self._timeline_was_playing = False
+        frame_count = self.source.frame_count
+        self.timeline_slider.blockSignals(True)
+        self.timeline_slider.setRange(0, max(0, frame_count - 1))
+        self.timeline_slider.setValue(0)
+        self.timeline_slider.blockSignals(False)
+        self.timeline_slider.setEnabled(
+            self.source.is_local_file and frame_count > 1
+        )
+        if self.source.is_local_file:
+            self.timeline_time_label.setText(
+                f"00:00 / {format_media_time(self.source.duration_seconds)}"
+            )
+        else:
+            self.timeline_time_label.setText("LIVE")
+
+    def _timeline_pressed(self) -> None:
+        if not self.source.is_local_file:
+            return
+        self._timeline_dragging = True
+        self._timeline_press_value = self.timeline_slider.value()
+        self._timeline_was_playing = (
+            self.playback_state == PlaybackState.PLAYING
+        )
+        if self._timeline_was_playing:
+            self.timer.stop()
+
+    def _timeline_moved(self, frame_number: int) -> None:
+        self._set_timeline_time(frame_number)
+
+    def _timeline_released(self) -> None:
+        if not self.source.is_local_file:
+            return
+        target_frame = self.timeline_slider.value()
+        self._timeline_dragging = False
+        if target_frame != self._timeline_press_value:
+            self._seek_to_frame(
+                target_frame,
+                resume_playback=self._timeline_was_playing,
+            )
+        elif self._timeline_was_playing:
+            self._play()
+        self._timeline_was_playing = False
+
+    def _timeline_value_changed(self, frame_number: int) -> None:
+        self._set_timeline_time(frame_number)
+        if self._timeline_dragging or not self.source.is_local_file:
+            return
+        if (
+            self.current_metadata is not None
+            and frame_number == self.current_metadata.frame_number
+        ):
+            return
+        self._seek_to_frame(
+            frame_number,
+            resume_playback=self.playback_state == PlaybackState.PLAYING,
+        )
+
+    def _seek_to_frame(
+        self,
+        frame_number: int,
+        *,
+        resume_playback: bool,
+    ) -> None:
+        if not self.source.is_local_file or self.source.capture is None:
+            return
+        self.timer.stop()
+        self._stop_recording()
+        if self.current_metadata is not None and self.engine.state != TrackingState.IDLE:
+            self.engine.clear(self.current_metadata)
+            self.pending_selection = None
+            self.video_widget.set_selection_enabled(False)
+            self.video_widget.clear_selection()
+            self.selection_notice.setText(
+                "Tracking cleared because video seeking changed temporal position."
+            )
+            self.selection_notice.setStyleSheet("color: #f5b046;")
+        bounded_frame = max(
+            0,
+            min(frame_number, max(0, self.source.frame_count - 1)),
+        )
+        if not self.source.seek_frame(bounded_frame):
+            self.statusBar().showMessage("Unable to seek to requested video position")
+            return
+        self.playback_state = PlaybackState.PAUSED
+        self._consume_next_frame()
+        self.statusBar().showMessage(
+            f"Video moved to {format_media_time(self.current_metadata.timestamp)}"
+            if self.current_metadata is not None
+            else "Video position changed"
+        )
+        if resume_playback:
+            self._play()
+        else:
+            self._pause()
+
+    def _update_timeline_position(
+        self,
+        frame_number: int,
+        timestamp: float,
+    ) -> None:
+        if not self.source.is_local_file or self._timeline_dragging:
+            return
+        self.timeline_slider.blockSignals(True)
+        self.timeline_slider.setValue(frame_number)
+        self.timeline_slider.blockSignals(False)
+        self.timeline_time_label.setText(
+            f"{format_media_time(timestamp)} / "
+            f"{format_media_time(self.source.duration_seconds)}"
+        )
+
+    def _set_timeline_time(self, frame_number: int) -> None:
+        fps = self.source.source_fps
+        current_seconds = frame_number / fps if fps > 0.0 else 0.0
+        self.timeline_time_label.setText(
+            f"{format_media_time(current_seconds)} / "
+            f"{format_media_time(self.source.duration_seconds)}"
+        )
 
     def _begin_selection(self) -> None:
         if self.current_metadata is None:
@@ -678,6 +833,11 @@ class MainWindow(QMainWindow):
         self.json_button.setEnabled(has_source)
         self.screenshot_button.setEnabled(self.current_annotated_frame is not None)
         self.record_button.setEnabled(self.current_annotated_frame is not None)
+        self.timeline_slider.setEnabled(
+            has_source
+            and self.source.is_local_file
+            and self.source.frame_count > 1
+        )
 
     def _update_status(self) -> None:
         result = self.current_result
@@ -717,6 +877,47 @@ class MainWindow(QMainWindow):
         self.metrics["quality"].setText(
             f"{(result.tracking_quality if result else 0.0):.0%}"
         )
+        verification_progress = (
+            int(result.diagnostics.get("reidentification_confirmation_progress", 0))
+            if result
+            else 0
+        )
+        verification_required = (
+            int(result.diagnostics.get("reidentification_confirmation_required", 0))
+            if result
+            else 0
+        )
+        self.metrics["verification"].setText(
+            f"{verification_progress} / {verification_required}"
+            if state in {TrackingState.REACQUIRING, TrackingState.LOST}
+            and verification_required > 0
+            else "--"
+        )
+        feature_available = bool(
+            result.diagnostics.get("reidentification_feature_available", False)
+            if result
+            else False
+        )
+        feature_matches = (
+            int(result.diagnostics.get("reidentification_feature_matches", 0))
+            if result
+            else 0
+        )
+        feature_inliers = (
+            float(
+                result.diagnostics.get(
+                    "reidentification_feature_inlier_ratio",
+                    0.0,
+                )
+            )
+            if result
+            else 0.0
+        )
+        self.metrics["feature_geometry"].setText(
+            f"{feature_matches} matches / {feature_inliers:.0%}"
+            if feature_available
+            else "Not available"
+        )
         self.metrics["position"].setText(
             f"{center[0]:.0f}, {center[1]:.0f}" if center else "--"
         )
@@ -740,6 +941,13 @@ class MainWindow(QMainWindow):
         )
         self.metrics["references"].setText(
             str(len(identity.references)) if identity else "0"
+        )
+        self.metrics["anchors"].setText(
+            str(
+                sum(reference.is_anchor for reference in identity.references)
+                if identity
+                else 0
+            )
         )
         tracker_name = self.config.tracking.preferred_tracker
         if tracker_name.upper() == "CSRT":

@@ -109,6 +109,7 @@ def _serialize_identity(identity: TargetIdentity | None) -> dict[str, Any] | Non
                 "confidence": reference.confidence,
                 "blur_variance": reference.blur_variance,
                 "is_original": reference.is_original,
+                "is_anchor": reference.is_anchor,
                 "crop_shape": list(reference.crop.shape),
             }
             for reference in identity.references

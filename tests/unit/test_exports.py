@@ -74,3 +74,4 @@ def test_json_does_not_serialize_raw_numpy_arrays(tmp_path) -> None:
     assert payload["schema_version"] == 1
     assert payload["target"]["reference_count"] == 1
     assert "crop" not in payload["target"]["references"][0]
+    assert payload["target"]["references"][0]["is_anchor"] is True

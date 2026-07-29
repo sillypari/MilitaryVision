@@ -14,6 +14,11 @@ from persistent_tracker.tracking.appearance import (
     histogram_similarity,
     template_similarity,
 )
+from persistent_tracker.tracking.feature_verification import (
+    FeatureVerification,
+    extract_orb_features,
+    verify_anchor_geometry,
+)
 from persistent_tracker.utils.geometry import box_center, box_iou
 
 
@@ -35,16 +40,46 @@ def combined_candidate_score(
     )
 
 
+def consensus_score(scores: list[float], required_references: int) -> float:
+    if not scores:
+        return 0.0
+    strongest = sorted(scores, reverse=True)[
+        : min(len(scores), max(1, required_references))
+    ]
+    return float(sum(strongest) / len(strongest))
+
+
 def choose_unambiguous_candidate(
     candidates: list[CandidateMatch],
     config: ReidentificationConfig,
     *,
     minimum_appearance_score: float | None = None,
+    minimum_anchor_similarity: float | None = None,
     require_motion_gate: bool = True,
     ambiguity_margin: float | None = None,
 ) -> CandidateMatch | None:
+    reason, best = candidate_rejection_reason(
+        candidates,
+        config,
+        minimum_appearance_score=minimum_appearance_score,
+        minimum_anchor_similarity=minimum_anchor_similarity,
+        require_motion_gate=require_motion_gate,
+        ambiguity_margin=ambiguity_margin,
+    )
+    return None if reason is not None else best
+
+
+def candidate_rejection_reason(
+    candidates: list[CandidateMatch],
+    config: ReidentificationConfig,
+    *,
+    minimum_appearance_score: float | None = None,
+    minimum_anchor_similarity: float | None = None,
+    require_motion_gate: bool = True,
+    ambiguity_margin: float | None = None,
+) -> tuple[str | None, CandidateMatch | None]:
     if not candidates:
-        return None
+        return "no plausible visual proposals", None
     ranked = sorted(candidates, key=lambda candidate: candidate.combined_score, reverse=True)
     best = ranked[0]
     second_score = ranked[1].combined_score if len(ranked) > 1 else 0.0
@@ -54,19 +89,40 @@ def choose_unambiguous_candidate(
         else config.minimum_appearance_score
     )
     if best.appearance_similarity < required_appearance:
-        return None
+        return (
+            "best candidate failed the combined appearance threshold",
+            best,
+        )
+    if (
+        minimum_anchor_similarity is not None
+        and best.anchor_similarity < minimum_anchor_similarity
+    ):
+        return (
+            "best candidate failed the immutable anchor threshold",
+            best,
+        )
+    if (
+        config.feature_verification_enabled
+        and best.feature_verification_available
+        and (
+            best.feature_matches < config.feature_minimum_matches
+            or best.feature_inlier_ratio
+            < config.feature_minimum_inlier_ratio
+        )
+    ):
+        return "best candidate failed anchor feature geometry", best
     if require_motion_gate and best.motion_similarity < 0.25:
-        return None
+        return "best candidate failed the local motion gate", best
     if best.combined_score < config.minimum_match_score:
-        return None
+        return "best candidate failed the total match threshold", best
     required_margin = (
         config.ambiguity_margin
         if ambiguity_margin is None
         else ambiguity_margin
     )
     if best.combined_score - second_score < required_margin:
-        return None
-    return best
+        return "leading candidates were too ambiguous", best
+    return None, best
 
 
 class LocalCandidateMatcher:
@@ -76,6 +132,8 @@ class LocalCandidateMatcher:
         self.config = config
         self.last_search_duration_ms = 0.0
         self.last_search_was_full_frame = False
+        self.last_rejection_reason: str | None = None
+        self.last_best_match: CandidateMatch | None = None
 
     def find(
         self,
@@ -87,6 +145,8 @@ class LocalCandidateMatcher:
         if identity.original_crop is None or identity.original_histogram is None:
             self.last_search_duration_ms = (perf_counter() - started_at) * 1000.0
             self.last_search_was_full_frame = False
+            self.last_rejection_reason = "target has no original identity anchor"
+            self.last_best_match = None
             return [], None
 
         frame_height, frame_width = frame.shape[:2]
@@ -129,19 +189,55 @@ class LocalCandidateMatcher:
                 ),
             ]
 
-        proposals: list[tuple[BoundingBox, float]] = []
-        reference_crops = [identity.original_crop]
+        proposals: list[tuple[BoundingBox, float, bool]] = []
         reference_limit = (
             self.config.full_frame_max_reference_templates
             if full_frame_search
             else 4
         )
-        recent_references = [
-            reference.crop
-            for reference in reversed(identity.references[1:])
-            if not reference.is_original
+        original_references = [
+            reference for reference in identity.references if reference.is_original
         ]
-        reference_crops.extend(recent_references[: max(0, reference_limit - 1)])
+        anchor_references = [
+            reference
+            for reference in identity.references
+            if reference.is_anchor and not reference.is_original
+        ]
+        adaptive_references = [
+            reference
+            for reference in reversed(identity.references)
+            if not reference.is_anchor
+        ]
+        if full_frame_search:
+            reserved_adaptive = (
+                adaptive_references[:1]
+                if adaptive_references and reference_limit >= 2
+                else []
+            )
+            anchor_slots = max(
+                0,
+                reference_limit
+                - len(original_references)
+                - len(reserved_adaptive),
+            )
+            ordered_references = (
+                original_references
+                + anchor_references[:anchor_slots]
+                + reserved_adaptive
+                + anchor_references[anchor_slots:]
+                + adaptive_references[len(reserved_adaptive):]
+            )
+        else:
+            ordered_references = (
+                original_references + adaptive_references + anchor_references
+            )
+        reference_templates = [
+            (reference.crop, reference.is_anchor)
+            for reference in ordered_references[:reference_limit]
+        ]
+        if not reference_templates:
+            reference_templates = [(identity.original_crop, True)]
+        reference_crops = [crop for crop, _is_anchor in reference_templates]
 
         for left, top, right, bottom in search_regions:
             search = frame[top:bottom, left:right]
@@ -162,7 +258,7 @@ class LocalCandidateMatcher:
                     interpolation=cv2.INTER_AREA,
                 )
             search_gray = cv2.cvtColor(search, cv2.COLOR_BGR2GRAY)
-            for reference_crop in reference_crops:
+            for reference_crop, reference_is_anchor in reference_templates:
                 reference_height, reference_width = reference_crop.shape[:2]
                 for scale in self._scales:
                     box_width = max(8, int(round(reference_width * scale)))
@@ -205,7 +301,9 @@ class LocalCandidateMatcher:
                             0.0,
                             min(1.0, (maximum + 1.0) / 2.0),
                         )
-                        proposals.append((box, normalized_score))
+                        proposals.append(
+                            (box, normalized_score, reference_is_anchor)
+                        )
                         suppress_left = max(0, location[0] - template_width // 2)
                         suppress_top = max(0, location[1] - template_height // 2)
                         suppress_right = min(
@@ -221,7 +319,7 @@ class LocalCandidateMatcher:
                             suppress_left:suppress_right,
                         ] = -1.0
 
-        deduplicated: list[tuple[BoundingBox, float]] = []
+        deduplicated: list[tuple[BoundingBox, float, bool]] = []
         for proposal in sorted(proposals, key=lambda item: item[1], reverse=True):
             if all(box_iou(proposal[0], existing[0]) < 0.25 for existing in deduplicated):
                 deduplicated.append(proposal)
@@ -231,26 +329,96 @@ class LocalCandidateMatcher:
         matches: list[CandidateMatch] = []
         predicted_width = max(1, predicted_box[2])
         predicted_height = max(1, predicted_box[3])
-        for candidate_id, (box, reference_appearance) in enumerate(
+        stored_anchor_references = [
+            reference for reference in identity.references if reference.is_anchor
+        ]
+        stored_adaptive_references = [
+            reference for reference in identity.references if not reference.is_anchor
+        ]
+        anchor_feature_sets = (
+            [
+                extract_orb_features(reference.crop)
+                for reference in stored_anchor_references
+            ]
+            if self.config.feature_verification_enabled
+            else []
+        )
+        for candidate_id, (
+            box,
+            reference_appearance,
+            proposal_used_anchor,
+        ) in enumerate(
             deduplicated,
             start=1,
         ):
             crop = extract_crop(frame, box)
-            original_appearance = template_similarity(identity.original_crop, crop)
-            appearance = 0.60 * original_appearance + 0.40 * reference_appearance
-            candidate_histogram = colour_histogram(crop)
-            original_colour = histogram_similarity(
-                identity.original_histogram,
-                candidate_histogram,
+            anchor_appearance_scores = [
+                template_similarity(reference.crop, crop)
+                for reference in stored_anchor_references
+            ]
+            if not anchor_appearance_scores:
+                anchor_appearance_scores = [
+                    template_similarity(identity.original_crop, crop)
+                ]
+            anchor_best_appearance = max(anchor_appearance_scores)
+            anchor_appearance = consensus_score(
+                anchor_appearance_scores,
+                self.config.anchor_consensus_references,
             )
-            historical_colour = max(
+            adaptive_appearance = max(
+                (
+                    template_similarity(reference.crop, crop)
+                    for reference in stored_adaptive_references
+                ),
+                default=0.0,
+            )
+            if proposal_used_anchor:
+                anchor_best_appearance = max(
+                    anchor_best_appearance,
+                    reference_appearance,
+                )
+            else:
+                adaptive_appearance = max(
+                    adaptive_appearance,
+                    reference_appearance,
+                )
+            if stored_adaptive_references:
+                anchor_weight = self.config.original_anchor_weight
+                appearance = (
+                    anchor_weight * anchor_appearance
+                    + (1.0 - anchor_weight) * adaptive_appearance
+                )
+            else:
+                appearance = anchor_appearance
+            candidate_histogram = colour_histogram(crop)
+            anchor_colour = consensus_score(
+                [
+                    histogram_similarity(reference.histogram, candidate_histogram)
+                    for reference in stored_anchor_references
+                ]
+                or [
+                    histogram_similarity(
+                        identity.original_histogram,
+                        candidate_histogram,
+                    )
+                ],
+                self.config.anchor_consensus_references,
+            )
+            adaptive_colour = max(
                 (
                     histogram_similarity(reference.histogram, candidate_histogram)
-                    for reference in identity.references[1:]
+                    for reference in stored_adaptive_references
                 ),
-                default=original_colour,
+                default=0.0,
             )
-            colour = 0.65 * original_colour + 0.35 * historical_colour
+            if stored_adaptive_references:
+                colour = (
+                    self.config.original_anchor_weight * anchor_colour
+                    + (1.0 - self.config.original_anchor_weight)
+                    * adaptive_colour
+                )
+            else:
+                colour = anchor_colour
             center = box_center(box)
             predicted_distance = math.dist(center, predicted_center)
             last_distance = math.dist(center, last_center)
@@ -285,6 +453,15 @@ class LocalCandidateMatcher:
                 size_similarity=size,
                 config=self.config,
             )
+            feature_verification = (
+                verify_anchor_geometry(
+                    anchor_feature_sets,
+                    extract_orb_features(crop),
+                    minimum_keypoints=self.config.feature_minimum_keypoints,
+                )
+                if self.config.feature_verification_enabled
+                else FeatureVerification(False, 0, 0.0)
+            )
             matches.append(
                 CandidateMatch(
                     candidate_id=candidate_id,
@@ -295,24 +472,43 @@ class LocalCandidateMatcher:
                     shape_similarity=shape,
                     size_similarity=size,
                     combined_score=score,
+                    anchor_similarity=anchor_appearance,
+                    adaptive_similarity=adaptive_appearance,
+                    anchor_best_similarity=anchor_best_appearance,
+                    feature_verification_available=(
+                        feature_verification.available
+                    ),
+                    feature_matches=feature_verification.good_matches,
+                    feature_inlier_ratio=feature_verification.inlier_ratio,
                 )
             )
 
-        accepted = choose_unambiguous_candidate(
+        minimum_appearance = (
+            self.config.full_frame_minimum_appearance_score
+            if full_frame_search
+            else None
+        )
+        minimum_anchor = (
+            self.config.full_frame_minimum_anchor_similarity
+            if full_frame_search
+            else None
+        )
+        required_ambiguity_margin = (
+            self.config.full_frame_ambiguity_margin
+            if full_frame_search
+            else None
+        )
+        rejection_reason, best_match = candidate_rejection_reason(
             matches,
             self.config,
-            minimum_appearance_score=(
-                self.config.full_frame_minimum_appearance_score
-                if full_frame_search
-                else None
-            ),
+            minimum_appearance_score=minimum_appearance,
+            minimum_anchor_similarity=minimum_anchor,
             require_motion_gate=not full_frame_search,
-            ambiguity_margin=(
-                self.config.full_frame_ambiguity_margin
-                if full_frame_search
-                else None
-            ),
+            ambiguity_margin=required_ambiguity_margin,
         )
+        accepted = None if rejection_reason is not None else best_match
+        self.last_rejection_reason = rejection_reason
+        self.last_best_match = best_match
         self.last_search_duration_ms = (perf_counter() - started_at) * 1000.0
         return matches, accepted
 

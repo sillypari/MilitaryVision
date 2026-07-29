@@ -8,6 +8,7 @@ import numpy as np
 from persistent_tracker.config import AppConfig
 from persistent_tracker.domain.models import (
     BoundingBox,
+    CandidateMatch,
     FrameMetadata,
     TargetIdentity,
     TrackingResult,
@@ -50,6 +51,7 @@ class TrackingEngine:
         self._unconfirmed_start_frame: int | None = None
         self._unconfirmed_start_timestamp: float | None = None
         self._candidate_streak = 0
+        self._candidate_gap_frames = 0
         self._last_candidate_box: BoundingBox | None = None
         self._weak_observation_frames = 0
         self._lost_search_countdown = 0
@@ -442,6 +444,43 @@ class TrackingEngine:
             predicted_box,
         )
         if accepted is None:
+            best = self.candidate_matcher.last_best_match
+            reason = self.candidate_matcher.last_rejection_reason
+            if (
+                reason is not None
+                and (
+                    self.identity.missed_frames <= 1
+                    or self.identity.missed_frames % 15 == 0
+                )
+            ):
+                LOGGER.info(
+                    "Reacquisition candidate rejected frame=%s scope=%s "
+                    "reason=%s anchor_consensus=%.3f anchor_best=%.3f "
+                    "adaptive=%.3f appearance=%.3f score=%.3f "
+                    "feature_available=%s feature_matches=%s "
+                    "feature_inliers=%.3f",
+                    metadata.frame_number,
+                    (
+                        "full_frame"
+                        if self.candidate_matcher.last_search_was_full_frame
+                        else "local"
+                    ),
+                    reason,
+                    best.anchor_similarity if best is not None else 0.0,
+                    best.anchor_best_similarity if best is not None else 0.0,
+                    best.adaptive_similarity if best is not None else 0.0,
+                    best.appearance_similarity if best is not None else 0.0,
+                    best.combined_score if best is not None else 0.0,
+                    (
+                        best.feature_verification_available
+                        if best is not None
+                        else False
+                    ),
+                    best.feature_matches if best is not None else 0,
+                    best.feature_inlier_ratio if best is not None else 0.0,
+                )
+            if self._hold_ambiguous_candidate(best, metadata):
+                return best.box if best is not None else None
             self._reset_candidate_confirmation()
             return None
 
@@ -452,11 +491,37 @@ class TrackingEngine:
             consistency_radius = max(candidate_box[2], candidate_box[3]) * 0.75
             if math.dist(previous_center, candidate_center) <= consistency_radius:
                 self._candidate_streak += 1
+                self._candidate_gap_frames = 0
             else:
                 self._candidate_streak = 1
+                self._candidate_gap_frames = 0
         else:
             self._candidate_streak = 1
+            self._candidate_gap_frames = 0
         self._last_candidate_box = candidate_box
+        if self._candidate_streak == 1:
+            LOGGER.info(
+                "Reacquisition candidate entered verification frame=%s "
+                "scope=%s anchor_consensus=%.3f anchor_best=%.3f "
+                "adaptive=%.3f appearance=%.3f score=%.3f "
+                "feature_available=%s feature_matches=%s feature_inliers=%.3f "
+                "required_frames=%s",
+                metadata.frame_number,
+                (
+                    "full_frame"
+                    if self.candidate_matcher.last_search_was_full_frame
+                    else "local"
+                ),
+                accepted.anchor_similarity,
+                accepted.anchor_best_similarity,
+                accepted.adaptive_similarity,
+                accepted.appearance_similarity,
+                accepted.combined_score,
+                accepted.feature_verification_available,
+                accepted.feature_matches,
+                accepted.feature_inlier_ratio,
+                self.config.reidentification.consecutive_confirmations,
+            )
 
         if self.state in {TrackingState.OCCLUDED, TrackingState.LOST}:
             was_lost = self.state == TrackingState.LOST
@@ -499,6 +564,20 @@ class TrackingEngine:
             TrackingState.LOCKED,
             metadata,
             "candidate identity verified across consecutive frames",
+        )
+        LOGGER.info(
+            "Reacquisition verified frame=%s anchor_consensus=%.3f "
+            "anchor_best=%.3f adaptive=%.3f appearance=%.3f score=%.3f "
+            "feature_available=%s feature_matches=%s feature_inliers=%.3f",
+            metadata.frame_number,
+            accepted.anchor_similarity,
+            accepted.anchor_best_similarity,
+            accepted.adaptive_similarity,
+            accepted.appearance_similarity,
+            accepted.combined_score,
+            accepted.feature_verification_available,
+            accepted.feature_matches,
+            accepted.feature_inlier_ratio,
         )
         self._append_trajectory(
             metadata,
@@ -582,7 +661,63 @@ class TrackingEngine:
 
     def _reset_candidate_confirmation(self) -> None:
         self._candidate_streak = 0
+        self._candidate_gap_frames = 0
         self._last_candidate_box = None
+
+    def _hold_ambiguous_candidate(
+        self,
+        best: CandidateMatch | None,
+        metadata: FrameMetadata,
+    ) -> bool:
+        if (
+            best is None
+            or self.candidate_matcher.last_rejection_reason
+            != "leading candidates were too ambiguous"
+        ):
+            return False
+
+        if self._last_candidate_box is not None:
+            previous_center = box_center(self._last_candidate_box)
+            candidate_center = box_center(best.box)
+            consistency_radius = max(best.box[2], best.box[3]) * 0.75
+            if math.dist(previous_center, candidate_center) > consistency_radius:
+                return False
+
+        self._candidate_gap_frames += 1
+        if (
+            self._candidate_gap_frames
+            > self.config.reidentification.confirmation_grace_frames
+        ):
+            return False
+
+        self._last_candidate_box = best.box
+        if self.state == TrackingState.LOST:
+            self._unconfirmed_start_frame = metadata.frame_number
+            self._unconfirmed_start_timestamp = metadata.timestamp
+            self._transition(
+                TrackingState.REACQUIRING,
+                metadata,
+                "strong but ambiguous candidate retained for verification",
+            )
+        LOGGER.info(
+            "Reacquisition candidate retained without confirmation frame=%s "
+            "streak=%s/%s grace=%s/%s anchor_consensus=%.3f "
+            "anchor_best=%.3f appearance=%.3f score=%.3f "
+            "feature_available=%s feature_matches=%s feature_inliers=%.3f",
+            metadata.frame_number,
+            self._candidate_streak,
+            self.config.reidentification.consecutive_confirmations,
+            self._candidate_gap_frames,
+            self.config.reidentification.confirmation_grace_frames,
+            best.anchor_similarity,
+            best.anchor_best_similarity,
+            best.appearance_similarity,
+            best.combined_score,
+            best.feature_verification_available,
+            best.feature_matches,
+            best.feature_inlier_ratio,
+        )
+        return True
 
     def _result(
         self,
@@ -606,10 +741,23 @@ class TrackingEngine:
             tracking_quality=identity.tracking_quality if identity else 0.0,
             velocity=identity.velocity if identity else (0.0, 0.0),
             missed_frames=identity.missed_frames if identity else 0,
-            trajectory=list(self.trajectory.points),
+            trajectory=self.trajectory.visible_points(
+                metadata.timestamp,
+                self.config.trajectory.fade_after_seconds,
+            ),
             diagnostics={
                 "path_length_pixels": self.trajectory.path_length_pixels,
                 "reference_count": len(identity.references) if identity else 0,
+                "anchor_reference_count": (
+                    self.identity_memory.anchor_reference_count(identity)
+                    if identity
+                    else 0
+                ),
+                "adaptive_reference_count": (
+                    len(self.identity_memory.adaptive_references(identity))
+                    if identity
+                    else 0
+                ),
                 "internal_id": identity.internal_id if identity else None,
                 "reidentification_search_ms": (
                     self.candidate_matcher.last_search_duration_ms
@@ -618,6 +766,40 @@ class TrackingEngine:
                     "full_frame"
                     if self.candidate_matcher.last_search_was_full_frame
                     else "local"
+                ),
+                "reidentification_rejection_reason": (
+                    self.candidate_matcher.last_rejection_reason
+                ),
+                "reidentification_anchor_similarity": (
+                    self.candidate_matcher.last_best_match.anchor_similarity
+                    if self.candidate_matcher.last_best_match is not None
+                    else 0.0
+                ),
+                "reidentification_adaptive_similarity": (
+                    self.candidate_matcher.last_best_match.adaptive_similarity
+                    if self.candidate_matcher.last_best_match is not None
+                    else 0.0
+                ),
+                "reidentification_feature_available": (
+                    self.candidate_matcher.last_best_match.feature_verification_available
+                    if self.candidate_matcher.last_best_match is not None
+                    else False
+                ),
+                "reidentification_feature_matches": (
+                    self.candidate_matcher.last_best_match.feature_matches
+                    if self.candidate_matcher.last_best_match is not None
+                    else 0
+                ),
+                "reidentification_feature_inlier_ratio": (
+                    self.candidate_matcher.last_best_match.feature_inlier_ratio
+                    if self.candidate_matcher.last_best_match is not None
+                    else 0.0
+                ),
+                "reidentification_confirmation_progress": (
+                    self._candidate_streak
+                ),
+                "reidentification_confirmation_required": (
+                    self.config.reidentification.consecutive_confirmations
                 ),
             },
         )

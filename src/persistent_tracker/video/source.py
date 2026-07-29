@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -11,6 +12,18 @@ from persistent_tracker.config import VideoConfig
 from persistent_tracker.domain.models import FrameMetadata, SourceState
 
 LOGGER = logging.getLogger(__name__)
+SOURCE_CREDENTIALS_PATTERN = re.compile(
+    r"(?P<scheme>^[a-zA-Z][a-zA-Z0-9+.-]*://)[^/@\s]+@"
+)
+
+
+def redact_source_credentials(source: str | int) -> str:
+    if isinstance(source, int):
+        return str(source)
+    return SOURCE_CREDENTIALS_PATTERN.sub(
+        r"\g<scheme><credentials-redacted>@",
+        source,
+    )
 
 
 class VideoSourceError(RuntimeError):
@@ -43,7 +56,14 @@ class VideoSource:
         if not capture.isOpened():
             capture.release()
             self.state = SourceState.ERROR
-            raise VideoSourceError(f"Unable to open video source: {source}")
+            safe_source = redact_source_credentials(source)
+            raise VideoSourceError(f"Unable to open video source: {safe_source}")
+        if not self.is_local_file:
+            buffer_requested = bool(capture.set(cv2.CAP_PROP_BUFFERSIZE, 1))
+            LOGGER.info(
+                "Requested one-frame live capture buffer accepted=%s",
+                buffer_requested,
+            )
         self.capture = capture
         self.source_fps = float(capture.get(cv2.CAP_PROP_FPS))
         if not 1.0 <= self.source_fps <= 240.0:
@@ -51,7 +71,11 @@ class VideoSource:
         self._stream_frame_number = 0
         self._opened_monotonic = time.monotonic()
         self.state = SourceState.READY
-        LOGGER.info("Opened source=%s fps=%.3f", source, self.source_fps)
+        LOGGER.info(
+            "Opened source=%s fps=%.3f",
+            redact_source_credentials(source),
+            self.source_fps,
+        )
 
     def read(self) -> tuple[np.ndarray, FrameMetadata] | None:
         if self.capture is None or self.state != SourceState.READY:
@@ -100,6 +124,18 @@ class VideoSource:
         if self.is_local_file:
             return max(0, int(self.capture.get(cv2.CAP_PROP_POS_FRAMES)) - 1)
         return self._stream_frame_number
+
+    @property
+    def frame_count(self) -> int:
+        if self.capture is None or not self.is_local_file:
+            return 0
+        return max(0, int(self.capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+
+    @property
+    def duration_seconds(self) -> float:
+        if self.frame_count <= 0 or self.source_fps <= 0.0:
+            return 0.0
+        return self.frame_count / self.source_fps
 
     @property
     def resolution(self) -> tuple[int, int]:

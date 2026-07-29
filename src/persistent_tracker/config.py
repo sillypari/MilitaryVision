@@ -65,7 +65,15 @@ class ReidentificationConfig:
     full_frame_processing_width: int = 640
     full_frame_max_reference_templates: int = 2
     full_frame_ambiguity_margin: float = 0.06
-    lost_search_interval_frames: int = 3
+    lost_search_interval_frames: int = 1
+    original_anchor_weight: float = 0.70
+    full_frame_minimum_anchor_similarity: float = 0.50
+    confirmation_grace_frames: int = 2
+    anchor_consensus_references: int = 2
+    feature_verification_enabled: bool = True
+    feature_minimum_keypoints: int = 12
+    feature_minimum_matches: int = 8
+    feature_minimum_inlier_ratio: float = 0.35
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +85,8 @@ class IdentityMemoryConfig:
     bootstrap_reference_interval_seconds: float
     minimum_blur_variance: float
     maximum_outside_ratio: float
+    trusted_reference_weight: float = 0.35
+    anchor_reference_count: int = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,12 +197,43 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("Full-frame ambiguity margin must be between 0.0 and 1.0.")
     if config.reidentification.lost_search_interval_frames < 1:
         errors.append("Lost-state search interval must be at least one frame.")
+    if config.reidentification.confirmation_grace_frames < 0:
+        errors.append("Reacquisition confirmation grace cannot be negative.")
+    if config.reidentification.anchor_consensus_references < 1:
+        errors.append("Anchor consensus references must be at least one.")
+    if config.reidentification.feature_minimum_keypoints < 4:
+        errors.append("Feature verification requires at least four keypoints.")
+    if config.reidentification.feature_minimum_matches < 4:
+        errors.append("Feature verification requires at least four matches.")
+    if not 0.0 <= config.reidentification.feature_minimum_inlier_ratio <= 1.0:
+        errors.append("Feature minimum inlier ratio must be between 0.0 and 1.0.")
+    if not 0.0 <= config.reidentification.original_anchor_weight <= 1.0:
+        errors.append("Original anchor weight must be between 0.0 and 1.0.")
+    if not (
+        0.0
+        <= config.reidentification.full_frame_minimum_anchor_similarity
+        <= 1.0
+    ):
+        errors.append(
+            "Full-frame minimum anchor similarity must be between 0.0 and 1.0."
+        )
     if (
         config.identity_memory.bootstrap_reference_count
         > config.identity_memory.maximum_references
     ):
         errors.append(
             "Bootstrap reference count cannot exceed maximum identity references."
+        )
+    if not 0.0 <= config.identity_memory.trusted_reference_weight <= 1.0:
+        errors.append("Trusted reference weight must be between 0.0 and 1.0.")
+    if config.identity_memory.anchor_reference_count < 1:
+        errors.append("Anchor reference count must be at least one.")
+    if (
+        config.identity_memory.anchor_reference_count
+        > config.identity_memory.maximum_references
+    ):
+        errors.append(
+            "Anchor reference count cannot exceed maximum identity references."
         )
     if config.video.processing_width < 320 or config.video.processing_height < 240:
         errors.append("Processing resolution must be at least 320 x 240.")
