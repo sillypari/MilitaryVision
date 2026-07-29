@@ -242,6 +242,18 @@ FIELD_GROUPS: dict[str, tuple[FieldSpec, ...]] = {
                 "Temporal confirmation remains required."
             ),
         ),
+        FieldSpec(
+            "reidentification.lost_search_interval_frames",
+            "Lost-state search interval (frames)",
+            "int",
+            1,
+            120,
+            1,
+            tooltip=(
+                "Whole-frame scan cadence after NO RELIABLE LOCATION. "
+                "Lower values relock sooner but use more CPU."
+            ),
+        ),
     ),
     "Identity memory": (
         score(

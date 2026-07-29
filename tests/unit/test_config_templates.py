@@ -63,3 +63,17 @@ def test_invalid_full_frame_ambiguity_margin_is_rejected() -> None:
     )
 
     assert "Full-frame ambiguity margin must be between 0.0 and 1.0." in errors
+
+
+def test_invalid_lost_search_interval_is_rejected() -> None:
+    config = load_config()
+    invalid_reidentification = replace(
+        config.reidentification,
+        lost_search_interval_frames=0,
+    )
+
+    errors = validate_config(
+        replace(config, reidentification=invalid_reidentification)
+    )
+
+    assert "Lost-state search interval must be at least one frame." in errors

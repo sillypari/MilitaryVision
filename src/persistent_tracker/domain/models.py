@@ -88,6 +88,7 @@ class TrajectoryPoint:
     confidence: float
     state: TrackingState
     predicted: bool
+    segment_start: bool = False
 
 
 @dataclass(slots=True)

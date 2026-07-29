@@ -36,6 +36,7 @@ or autonomous decision functionality.
 - A persistent internal identity independent of an external tracker ID
 - Appearance, colour, shape, size, motion, and visibility confidence signals
 - Full-frame identity reacquisition after large or unpredictable movement
+- Continued low-frequency whole-frame identity search after the target is lost
 - Multi-frame verification and ambiguity rejection before relocking
 - Kalman-based motion prediction during short occlusions
 - Clearly different confirmed, predicted, unverified, and lost overlays
@@ -101,7 +102,7 @@ than an arbitrary identity switch.
 | `CONFIRMED` | The target is visible and identity checks pass | Solid confirmed overlay |
 | `PREDICTED` | A short occlusion is being bridged by motion prediction | Predicted overlay only |
 | `UNVERIFIED` | Whole-frame candidates are being checked | Candidate is not shown as locked |
-| `NO RELIABLE LOCATION` | Identity cannot be verified | No fabricated location |
+| `NO LOCATION - SEARCHING` | Identity cannot be verified; periodic whole-frame scans continue | No fabricated location |
 
 Media playback state is separate from tracking identity, so pausing a video does
 not turn a confirmed target into a different tracking state.
@@ -211,6 +212,7 @@ Important laptop settings:
 | `reidentification.full_frame_minimum_appearance_score` | `0.76` | Rejects weak distant identity matches |
 | `reidentification.full_frame_ambiguity_margin` | `0.06` | Rejects similarly plausible full-frame candidates |
 | `reidentification.consecutive_confirmations` | `3` | Prevents one-frame relock decisions |
+| `reidentification.lost_search_interval_frames` | `3` | Controls background search cadence after the target is lost |
 
 Recommended tuning order:
 
@@ -279,6 +281,8 @@ The suite covers:
 
 - Candidate weighting and ambiguity rejection
 - Opposite-quadrant full-frame reacquisition
+- Reacquisition after entering the lost state
+- Lost-state search cadence and ambiguous-return rejection
 - Partial appearance change during distant reacquisition
 - Rejection of two equally plausible targets
 - Gradual motion, rotation, scale, and lighting changes
@@ -316,7 +320,9 @@ No visual-only tracker can guarantee permanent identity.
 Verification may become impossible when the target remains outside the frame,
 is hidden for a long period, becomes too small or blurred, changes appearance
 completely, or is indistinguishable from another object during a full occlusion.
-MilitaryVision reports that uncertainty instead of fabricating confidence.
+MilitaryVision reports that uncertainty instead of fabricating confidence. It
+continues periodic whole-frame searches while the source is running, but it
+cannot recover until the stored identity can be verified again.
 
 The current template and colour identity model is intentionally lightweight. It
 is effective for an MVP but is not equivalent to a learned general-purpose ReID
@@ -344,6 +350,7 @@ not merely the duration of continuous tracking.
 - [Architecture](docs/ARCHITECTURE.md)
 - [Development plan](docs/DEVELOPMENT_PLAN.md)
 - [Settings and templates](docs/SETTINGS.md)
+- [SAM 2 requirements and integration plan](docs/SAM2_REQUIREMENTS.md)
 
 Contributions should preserve the identity-first rule, keep confirmed
 observations separate from predictions, and include tests for any change to

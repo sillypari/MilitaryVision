@@ -68,6 +68,16 @@ Predicted trajectory points are recorded only while the state remains
 leaves the frame or the prediction window expires, the state changes to
 `REACQUIRING` and the trajectory stops extending.
 
+After the bounded reacquisition window expires, `LOST` means there is no reliable
+location, not that processing has stopped. The engine performs a configurable
+low-frequency whole-frame search while remaining in `LOST`. A plausible match
+transitions to `REACQUIRING`, restarts the verification window, and must pass the
+same ambiguity and consecutive-confirmation gates before `LOCKED`.
+
+The first confirmed trajectory point after a lost interval starts a new segment.
+Rendering and path-length calculation do not connect the last known position to
+the reacquired position across unknown motion.
+
 This mechanism intentionally prefers false negatives over false positive identity
 switches. A future detector or embedding model can implement the same candidate
 interface without changing state ownership.

@@ -31,3 +31,24 @@ def test_trajectory_is_bounded() -> None:
     trajectory.append(point(1, False))
     trajectory.append(point(2, False))
     assert [item.x for item in trajectory.points] == [1, 2]
+
+
+def test_reacquired_segment_can_be_marked_as_a_new_path() -> None:
+    trajectory = Trajectory(maximum_points=10)
+    trajectory.append(point(0, False))
+    reacquired = TrajectoryPoint(
+        frame_number=20,
+        timestamp=2.0,
+        x=150.0,
+        y=100.0,
+        width=20.0,
+        height=20.0,
+        confidence=0.8,
+        state=TrackingState.LOCKED,
+        predicted=False,
+        segment_start=True,
+    )
+    trajectory.append(reacquired)
+
+    assert reacquired.segment_start
+    assert trajectory.path_length_pixels == 0.0

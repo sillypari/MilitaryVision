@@ -21,7 +21,12 @@ class Trajectory:
         total = 0.0
         previous: TrajectoryPoint | None = None
         for point in self.points:
-            if previous is not None and not point.predicted and not previous.predicted:
+            if (
+                previous is not None
+                and not point.segment_start
+                and not point.predicted
+                and not previous.predicted
+            ):
                 total += ((point.x - previous.x) ** 2 + (point.y - previous.y) ** 2) ** 0.5
             previous = point
         return total

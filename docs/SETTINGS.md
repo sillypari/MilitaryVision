@@ -135,7 +135,14 @@ reidentification:
   full_frame_motion_floor: 0.75
   full_frame_ambiguity_margin: 0.06
   consecutive_confirmations: 3
+  lost_search_interval_frames: 3
 ```
+
+`lost_search_interval_frames` controls the continued whole-frame scan after the
+bounded reacquisition window expires. A value of `3` searches ten times per
+second on a 30 FPS source. The UI remains in `NO LOCATION - SEARCHING` until a
+candidate passes the normal multi-frame verification. Set the interval to `1`
+for the quickest response at higher CPU cost, or raise it on slower hardware.
 
 For fewer false relocks, increase these cautiously:
 

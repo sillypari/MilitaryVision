@@ -49,6 +49,7 @@ reidentification:
   full_frame_processing_width: 640
   full_frame_max_reference_templates: 2
   full_frame_ambiguity_margin: 0.06
+  lost_search_interval_frames: 3
 
 identity_memory:
   minimum_update_confidence: 0.74

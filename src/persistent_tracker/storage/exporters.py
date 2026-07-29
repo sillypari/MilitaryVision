@@ -127,6 +127,7 @@ def _serialize_point(point: TrajectoryPoint) -> dict[str, Any]:
         "confidence": point.confidence,
         "state": point.state.value,
         "predicted": point.predicted,
+        "segment_start": point.segment_start,
     }
 
 

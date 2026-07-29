@@ -48,6 +48,8 @@ A local candidate can restore confirmed tracking only after:
 5. Remaining spatially consistent for multiple frames.
 
 When these conditions fail, the state remains `REACQUIRING` or becomes `LOST`.
+`LOST` has no displayed location but continues a low-frequency full-frame
+identity search while video processing remains active.
 
 ## Laptop expectation
 

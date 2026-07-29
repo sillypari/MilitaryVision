@@ -52,6 +52,8 @@ class TrackingEngine:
         self._candidate_streak = 0
         self._last_candidate_box: BoundingBox | None = None
         self._weak_observation_frames = 0
+        self._lost_search_countdown = 0
+        self._trajectory_break_pending = False
 
     @property
     def state(self) -> TrackingState:
@@ -79,6 +81,8 @@ class TrackingEngine:
         self.trajectory.clear()
         self._reset_candidate_confirmation()
         self._weak_observation_frames = 0
+        self._lost_search_countdown = 0
+        self._trajectory_break_pending = False
 
     def cancel_selection(self, metadata: FrameMetadata) -> None:
         if self.state == TrackingState.SELECTING:
@@ -150,15 +154,18 @@ class TrackingEngine:
         self.trajectory.clear()
         self._reset_candidate_confirmation()
         self._weak_observation_frames = 0
+        self._lost_search_countdown = 0
+        self._trajectory_break_pending = False
 
     def update(self, frame: np.ndarray, metadata: FrameMetadata) -> TrackingResult:
         if self.identity is None or self.state in {
             TrackingState.IDLE,
             TrackingState.SELECTING,
             TrackingState.INITIALIZING,
-            TrackingState.LOST,
         }:
             return self._result(frame, metadata)
+        if self.state == TrackingState.LOST:
+            return self._update_lost(frame, metadata)
 
         predicted_center = self.motion.predict(metadata.timestamp)
         self.identity.predicted_centroid = predicted_center
@@ -242,6 +249,42 @@ class TrackingEngine:
             frame,
             metadata,
             predicted_box=predicted_box if show_prediction else None,
+            candidate_box=candidate_box,
+        )
+
+    def _update_lost(
+        self,
+        frame: np.ndarray,
+        metadata: FrameMetadata,
+    ) -> TrackingResult:
+        assert self.identity is not None
+        self.identity.missed_frames += 1
+        self.identity.confidence = 0.0
+        self.identity.identity_confidence = 0.0
+        self.identity.tracking_quality = 0.0
+
+        if self._lost_search_countdown > 0:
+            self._lost_search_countdown -= 1
+            self.candidate_matcher.last_search_duration_ms = 0.0
+            self.candidate_matcher.last_search_was_full_frame = True
+            return self._result(frame, metadata)
+
+        self._lost_search_countdown = (
+            self.config.reidentification.lost_search_interval_frames - 1
+        )
+        if self.identity.last_box is None:
+            return self._result(frame, metadata)
+
+        candidate_box = self._attempt_reacquisition(
+            frame,
+            self.identity.last_box,
+            metadata,
+        )
+        if self.state == TrackingState.LOCKED and self.identity.last_box is not None:
+            return self._result(frame, metadata, box=self.identity.last_box)
+        return self._result(
+            frame,
+            metadata,
             candidate_box=candidate_box,
         )
 
@@ -415,11 +458,20 @@ class TrackingEngine:
             self._candidate_streak = 1
         self._last_candidate_box = candidate_box
 
-        if self.state == TrackingState.OCCLUDED:
+        if self.state in {TrackingState.OCCLUDED, TrackingState.LOST}:
+            was_lost = self.state == TrackingState.LOST
+            if was_lost:
+                self._unconfirmed_start_frame = metadata.frame_number
+                self._unconfirmed_start_timestamp = metadata.timestamp
             self._transition(
                 TrackingState.REACQUIRING,
                 metadata,
-                "plausible candidate found; temporal verification required",
+                (
+                    "plausible candidate found during lost-state search; "
+                    "temporal verification required"
+                    if was_lost
+                    else "plausible candidate found; temporal verification required"
+                ),
             )
 
         if self._candidate_streak < self.config.reidentification.consecutive_confirmations:
@@ -465,6 +517,10 @@ class TrackingEngine:
         metadata: FrameMetadata,
         reason: str,
     ) -> None:
+        if state == TrackingState.LOST:
+            self._lost_search_countdown = 0
+            self._reset_candidate_confirmation()
+            self._trajectory_break_pending = True
         self.state_machine.transition(
             state,
             reason=reason,
@@ -494,8 +550,11 @@ class TrackingEngine:
                 confidence=confidence,
                 state=self.state,
                 predicted=predicted,
+                segment_start=self._trajectory_break_pending,
             )
         )
+        if not predicted:
+            self._trajectory_break_pending = False
 
     def _elapsed_unconfirmed_frames(self, metadata: FrameMetadata) -> int:
         start = self._unconfirmed_start_frame

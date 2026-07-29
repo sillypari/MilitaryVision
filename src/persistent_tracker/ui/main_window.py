@@ -94,7 +94,7 @@ class MainWindow(QMainWindow):
         header_layout.addStretch()
         self.state_badge = QLabel("NO TARGET")
         self.state_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.state_badge.setMinimumWidth(170)
+        self.state_badge.setMinimumWidth(220)
         self.state_badge.setMinimumHeight(34)
         header_layout.addWidget(self.state_badge)
         root_layout.addWidget(header)
@@ -690,7 +690,7 @@ class MainWindow(QMainWindow):
             TrackingState.LOCKED: ("CONFIRMED", "#6edc7c"),
             TrackingState.OCCLUDED: ("PREDICTED", "#f5b046"),
             TrackingState.REACQUIRING: ("UNVERIFIED", "#cd80d2"),
-            TrackingState.LOST: ("NO RELIABLE LOCATION", "#eb6060"),
+            TrackingState.LOST: ("NO LOCATION - SEARCHING", "#eb6060"),
         }
         label, colour = labels[state]
         self.state_badge.setText(label)

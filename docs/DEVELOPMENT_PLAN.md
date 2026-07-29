@@ -16,6 +16,7 @@
 - Kalman prediction
 - Conservative full-frame reacquisition
 - Full-frame reacquisition with multi-frame identity verification
+- Continued identity search after the target is declared lost
 - Professional PySide6 interface
 - Trajectory, screenshot, JSON, CSV, and annotated-video export
 - Validated settings page and reusable configuration templates

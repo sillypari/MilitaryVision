@@ -1,7 +1,9 @@
+from dataclasses import replace
+
 import cv2
 import numpy as np
 
-from persistent_tracker.config import load_config
+from persistent_tracker.config import AppConfig, load_config
 from persistent_tracker.domain.models import FrameMetadata, TrackingState
 from persistent_tracker.tracking.engine import TrackingEngine
 
@@ -13,6 +15,22 @@ def metadata(frame_number: int) -> FrameMetadata:
         width=640,
         height=360,
         source_fps=30.0,
+    )
+
+
+def short_lost_config() -> AppConfig:
+    base = load_config()
+    return replace(
+        base,
+        tracking=replace(
+            base.tracking,
+            maximum_reacquisition_frames=2,
+            maximum_reacquisition_seconds=100.0,
+        ),
+        reidentification=replace(
+            base.reidentification,
+            lost_search_interval_frames=2,
+        ),
     )
 
 
@@ -195,3 +213,98 @@ def test_scaled_full_frame_search_maps_candidate_to_processing_coordinates() -> 
     assert accepted is not None
     assert abs(accepted.box[0] - 1010) <= 2
     assert abs(accepted.box[1] - 430) <= 2
+
+
+def test_lost_target_is_found_when_it_returns_to_the_frame() -> None:
+    generator = np.random.default_rng(774)
+    background = generator.integers(0, 35, (360, 640, 3), dtype=np.uint8)
+    target = generator.integers(45, 230, (70, 90, 3), dtype=np.uint8)
+    initial = background.copy()
+    initial[130:200, 60:150] = target
+    missing = background.copy()
+    reappeared = background.copy()
+    reappeared[220:290, 480:570] = target
+
+    engine = TrackingEngine(short_lost_config())
+    engine.begin_selection(metadata(0))
+    engine.initialize(initial, (60, 130, 90, 70), metadata(0))
+    engine.short_tracker.update = lambda _frame: (False, None)  # type: ignore[method-assign]
+
+    lost_result = None
+    for frame_number in range(1, 5):
+        lost_result = engine.update(missing, metadata(frame_number))
+
+    assert lost_result is not None
+    assert lost_result.state == TrackingState.LOST
+    assert lost_result.box is None
+    assert lost_result.predicted_box is None
+    assert lost_result.candidate_box is None
+
+    results = [
+        engine.update(reappeared, metadata(frame_number))
+        for frame_number in range(5, 9)
+    ]
+
+    assert any(result.state == TrackingState.REACQUIRING for result in results)
+    assert results[-1].state == TrackingState.LOCKED
+    assert results[-1].box is not None
+    assert results[-1].box[0] > 400
+    assert engine.trajectory.points[-1].segment_start
+
+
+def test_lost_state_rejects_ambiguous_returning_targets() -> None:
+    generator = np.random.default_rng(784)
+    background = generator.integers(0, 35, (360, 640, 3), dtype=np.uint8)
+    target = generator.integers(45, 230, (70, 90, 3), dtype=np.uint8)
+    initial = background.copy()
+    initial[130:200, 60:150] = target
+    missing = background.copy()
+    ambiguous = background.copy()
+    ambiguous[40:110, 70:160] = target
+    ambiguous[220:290, 480:570] = target
+
+    engine = TrackingEngine(short_lost_config())
+    engine.begin_selection(metadata(0))
+    engine.initialize(initial, (60, 130, 90, 70), metadata(0))
+    engine.short_tracker.update = lambda _frame: (False, None)  # type: ignore[method-assign]
+    for frame_number in range(1, 5):
+        engine.update(missing, metadata(frame_number))
+    assert engine.state == TrackingState.LOST
+
+    results = [
+        engine.update(ambiguous, metadata(frame_number))
+        for frame_number in range(5, 11)
+    ]
+
+    assert all(result.state == TrackingState.LOST for result in results)
+    assert all(result.box is None for result in results)
+    assert all(result.candidate_box is None for result in results)
+
+
+def test_lost_state_search_uses_configured_frame_interval() -> None:
+    generator = np.random.default_rng(794)
+    frame = generator.integers(0, 256, (360, 640, 3), dtype=np.uint8)
+    config = short_lost_config()
+    config = replace(
+        config,
+        reidentification=replace(
+            config.reidentification,
+            lost_search_interval_frames=3,
+        ),
+    )
+    engine = TrackingEngine(config)
+    engine.begin_selection(metadata(0))
+    engine.initialize(frame, (80, 100, 90, 70), metadata(0))
+    engine._transition(TrackingState.LOST, metadata(1), "test")
+    searches = 0
+
+    def no_candidate(*_args: object) -> tuple[list[object], None]:
+        nonlocal searches
+        searches += 1
+        return [], None
+
+    engine.candidate_matcher.find = no_candidate  # type: ignore[method-assign]
+    for frame_number in range(2, 11):
+        engine.update(frame, metadata(frame_number))
+
+    assert searches == 3

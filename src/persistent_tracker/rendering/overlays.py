@@ -17,7 +17,7 @@ STATE_STYLE: dict[TrackingState, tuple[tuple[int, int, int], str]] = {
     TrackingState.LOCKED: ((124, 220, 108), "CONFIRMED"),
     TrackingState.OCCLUDED: ((70, 176, 245), "PREDICTED"),
     TrackingState.REACQUIRING: ((210, 128, 205), "UNVERIFIED"),
-    TrackingState.LOST: ((96, 96, 235), "NO RELIABLE LOCATION"),
+    TrackingState.LOST: ((96, 96, 235), "NO LOCATION - SEARCHING"),
 }
 
 
@@ -65,6 +65,8 @@ def _draw_dashed_box(
 
 def _draw_trajectory(frame: np.ndarray, points: list[TrajectoryPoint]) -> None:
     for previous, current in zip(points, points[1:]):
+        if current.segment_start:
+            continue
         start = (int(round(previous.x)), int(round(previous.y)))
         end = (int(round(current.x)), int(round(current.y)))
         if previous.predicted or current.predicted:
