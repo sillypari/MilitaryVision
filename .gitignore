@@ -1,0 +1,18 @@
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+
+# All generated runtime material stays in these project-local folders.
+output/*
+!output/.gitkeep
+runtime/*
+!runtime/.gitkeep
+models/*
+!models/.gitkeep
+
+*.egg-info/
+build/
+dist/

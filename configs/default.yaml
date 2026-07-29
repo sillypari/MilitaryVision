@@ -1,0 +1,68 @@
+application:
+  name: MilitaryVision
+  debug: false
+
+video:
+  processing_width: 1280
+  processing_height: 720
+  reconnect_attempts: 3
+  default_camera_index: 0
+  mirror_camera_default: true
+
+tracking:
+  preferred_tracker: CSRT
+  csrt_profile: BALANCED
+  locked_minimum: 0.72
+  minimum_identity_confidence: 0.62
+  minimum_tracking_quality: 0.55
+  locked_exit_identity_confidence: 0.50
+  locked_exit_tracking_quality: 0.75
+  weak_observation_grace_frames: 5
+  appearance_override_identity_confidence: 0.68
+  appearance_override_template_similarity: 0.52
+  appearance_override_tracking_quality: 0.65
+  prediction_maximum_outside_ratio: 0.50
+  occlusion_threshold: 0.48
+  lost_threshold: 0.25
+  maximum_prediction_frames: 30
+  maximum_prediction_seconds: 2.0
+  maximum_reacquisition_frames: 120
+  maximum_reacquisition_seconds: 8.0
+  search_area_growth: 1.15
+  maximum_speed_px_per_second: 1600.0
+
+reidentification:
+  appearance_weight: 0.45
+  motion_weight: 0.25
+  shape_weight: 0.10
+  colour_weight: 0.10
+  size_weight: 0.10
+  minimum_match_score: 0.78
+  minimum_appearance_score: 0.72
+  ambiguity_margin: 0.12
+  consecutive_confirmations: 3
+  local_search_radius: 180
+  last_position_search_multiplier: 1.25
+  full_frame_search_after_frames: 0
+  full_frame_motion_floor: 0.35
+  full_frame_minimum_appearance_score: 0.82
+  full_frame_processing_width: 640
+  full_frame_max_reference_templates: 2
+
+identity_memory:
+  minimum_update_confidence: 0.74
+  maximum_references: 8
+  minimum_reference_interval_seconds: 0.50
+  bootstrap_reference_count: 3
+  bootstrap_reference_interval_seconds: 0.05
+  minimum_blur_variance: 45.0
+  maximum_outside_ratio: 0.05
+
+trajectory:
+  maximum_points: 1000
+  include_predictions: true
+  fade_after_seconds: 12.0
+
+export:
+  default_fps: 30.0
+  video_codec: mp4v
